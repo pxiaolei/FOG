@@ -1,0 +1,16 @@
+# lx_shujuku 配置文件
+# 复制本文件为 config.yaml 并填入你的个人账号
+
+api:
+  base_url: "http://datareporting.sfczhushou.com"
+  username: "你的用户名"     # ← 替换为你的账号
+  password: "你的密码"       # ← 替换为你的密码
+
+# 可选：查询超时设置（秒）
+# timeout: 30
+
+# 可选：SELECT 未写 LIMIT 时自动追加的默认行数
+# default_limit: 100
+
+# 可选：单次查询允许的最大 LIMIT
+# max_limit: 1000

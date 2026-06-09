@@ -1,0 +1,6 @@
+output/
+*.bak.*
+*.tmp
+*.tmp.*
+__pycache__/
+*.pyc

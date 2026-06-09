@@ -1,0 +1,7 @@
+assets/config.yaml
+assets/cache/
+assets/query_runs/
+.token_cache
+__pycache__/
+*.pyc
+*.bak.*

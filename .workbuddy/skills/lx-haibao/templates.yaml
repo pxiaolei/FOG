@@ -1,0 +1,21 @@
+templates:
+  - layout-hero-grid
+  - layout-card-matrix
+  - uploaded-20260521-01
+  - uploaded-20260522-01
+
+layout-hero-grid:
+  display_name: "顶部主视觉网格版"
+  example_path: "${SKILL_ROOT}/template-examples/template-layout-hero-grid.png"
+
+layout-card-matrix:
+  display_name: "紧凑卡片矩阵版"
+  example_path: "${SKILL_ROOT}/template-examples/template-layout-card-matrix.png"
+
+uploaded-20260521-01:
+  display_name: "上传结构保真模板"
+  example_path: "${SKILL_ROOT}/template-examples/template-uploaded-20260521-01.png"
+
+uploaded-20260522-01:
+  display_name: "上传左栏城市活动模板"
+  example_path: "${SKILL_ROOT}/template-examples/template-uploaded-20260522-01.png"

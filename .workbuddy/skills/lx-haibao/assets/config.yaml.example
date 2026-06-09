@@ -1,0 +1,21 @@
+# lx-haibao 海报生成配置模板
+# 复制为 config.yaml 后，把管理员提供的图片生成 Key 填到对应 provider。
+# config.yaml 是个人真实配置，不要发到群里，也不要打进分享包。
+
+image_api:
+  provider_primary: "volcengine_seedream"
+  provider_fallback: "apimart"
+
+  volcengine_seedream:
+    api_key: ""
+    base_url: "https://ark.cn-beijing.volces.com/api/v3"
+    model: "doubao-seedream-5-0-260128"
+    size: "1600x2848"
+    response_format: "url"
+    output_format: "png"
+    watermark: false
+
+  apimart:
+    api_key: ""
+    base_url: "https://api.apimart.ai/v1"
+    model: "gpt-image-2"

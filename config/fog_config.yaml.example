@@ -1,0 +1,115 @@
+# FOG 项目统一配置模板
+# 复制为 config/fog_config.yaml 后填写个人配置。
+# config/fog_config.yaml 包含账号、token、个人目录等敏感或本地化信息，不提交到版本控制。
+
+version: 1
+
+project:
+  # 留空时初始化脚本使用当前项目根目录。
+  root: ""
+  workspace_root: "workspace"
+
+enabled_skills:
+  # 公司 dataReporting 只读查询与 operator_brand 码表。
+  lx_shujuku: true
+  # 腾讯文档发布能力，供拆表、日报等业务 Skill 复用。
+  lx_txwendang: true
+  # 按运营主体/城市/品牌拆表；发布腾讯文档时调用 lx_txwendang。
+  lx_zhutichaibiao: true
+  # 端外海报生成。
+  lx_haibao: true
+  # 运营日报生成；依赖 lx_shujuku 查询数据，依赖全局 tencent-saas-docs 发布企业版腾讯文档。
+  lx_dapanribao: true
+
+# 可选：共享日报等能力使用的 PostgreSQL 配置。没有数据库权限时保持空值即可。
+database:
+  host: ""
+  port: 5432
+  database: ""
+  user: ""
+  password: ""
+
+lx_shujuku:
+  api:
+    base_url: "http://datareporting.sfczhushou.com"
+    username: ""
+    password: ""
+  query:
+    default_limit: 100
+    max_limit: 1000
+
+lx_zhutichaibiao:
+  work_dir: "workspace/01主体拆表"
+  # 分享模板不写个人默认对接人；个人真实配置中填中文全名，如 ["雷维亮"]。
+  default_persons: []
+  # 码表固定来自 lx_shujuku 查询 dataReporting.operator_brand。
+  mabiao_source: "lx_shujuku.operator_brand"
+  default:
+    city_fields:
+      - "城市"
+      - "城市名称"
+      - "注册城市"
+      - "所属城市"
+      - "所属城市名称"
+      - "城市名"
+      - "city_name"
+    brand_fields:
+      - "品牌"
+      - "品牌名称"
+      - "商家"
+      - "商家名称"
+      - "合作品牌"
+      - "合作商家"
+      - "运力品牌"
+      - "brand_name"
+    process_sheets: []
+  special_configs: []
+
+lx_haibao:
+  output_dir: "workspace/09端外海报图/产出图"
+  meta_dir: "workspace/09端外海报图/元数据"
+  tmp_dir: "workspace/09端外海报图/临时图"
+  image_api:
+    provider_primary: "volcengine_seedream"
+    provider_fallback: "apimart"
+    volcengine_seedream:
+      api_key: ""
+      base_url: "https://ark.cn-beijing.volces.com/api/v3"
+      model: "doubao-seedream-5-0-260128"
+      size: "1600x2848"
+      response_format: "url"
+      output_format: "png"
+      watermark: false
+    apimart:
+      api_key: ""
+      base_url: "https://api.apimart.ai/v1"
+      model: "gpt-image-2"
+
+lx_dapanribao:
+  default_person: ""
+  output_dir: "workspace/03数据报表/日报"
+  publish_backend: "tencent-saas-docs"
+  enterprise_root_folder_url: ""
+  enterprise_root_folder_id: ""
+  operator_folder_name_template: "{operator}"
+  report_title_template: "{operator}-大盘数据对比"
+  title_suffix: "大盘数据对比"
+  anomaly_threshold_volume: 0.05
+  anomaly_threshold_rate: 0.02
+  deep_analysis_top_k: 5
+
+lx_txwendang:
+  tdocs:
+    root_folder_id: ""
+    openapi:
+      client_id: ""
+      # client_secret 不进入模板仓库；如团队决定共用，也由初始化时单独写入真实配置。
+      client_secret: ""
+      access_token: ""
+      refresh_token: ""
+      open_id: ""
+
+init:
+  write_skill_configs: false
+  validate_after_write: true
+  report_path: ".lx-init-report.md"
