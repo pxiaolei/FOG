@@ -30,6 +30,7 @@ enabled_skills:
   lx_haibao: true
   lx_dapanribao: true
   lx_nongfu: true
+  lx_biaogetongbu: true
 
 # ============================================================
 # database
@@ -162,6 +163,13 @@ lx_nongfu:
     header_row: 1
     writeback_update_columns: []
   operator_doc:
+    # 大文档链接每次任务输入，不建议写进配置。
+    # 这里配置稳定的“对接人 -> 该对接人名下运营主体根文件夹”映射。
+    # 共享模板保持空；每位同事在自己的 config/fog_config.yaml 中填写自己的根文件夹。
+    contact_person_root_folders: {}
+    operator_root_folder_url: ""
+    operator_root_folder_token: ""
+    operator_folder_name_template: "{operator}-运营主体"
     target_table_name_template: "{operator}-日常信息"
     sheet_name_template: "{date}{topic}"
     feishu_cache_path: ".workbuddy/skills/lx-feishudocs/assets/feishu_sheet_cache.json"
@@ -172,6 +180,23 @@ lx_nongfu:
     require_dry_run: true
     require_brand_city_match: true
     writeback_mode: "update_by_key"
+
+# ============================================================
+# lx_biaogetongbu
+# 要配置什么：通用表格同步和固定运营主体回填场景。
+# 说明：共享模板不写真实飞书大表链接；每个人在本机 config/fog_config.yaml 填自己的默认值。
+# ============================================================
+lx_biaogetongbu:
+  default_contact_persons: []
+  operator_sync:
+    contact_person_root_folders: {}
+    operator_root_folder_url: ""
+    operator_root_folder_token: ""
+    scenarios:
+      beishen_shensu:
+        master_url: ""
+      jingmo_chengke:
+        master_url: ""
 
 # ============================================================
 # lx_feishudocs

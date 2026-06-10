@@ -1,0 +1,17 @@
+{
+  "scenario_id": "jingmo_chengke",
+  "description": "雷维亮对接运营主体的静默乘客普通表格同步。大表链接运行时传入或写入本机 config，不写进共享 profile。",
+  "trigger_keywords": ["同步静默乘客"],
+  "master_sheet_name": "静默收集",
+  "operator_sheet_name": "",
+  "operator_folder_template": "{operator}-运营主体",
+  "target_table_template": "{operator}-静默乘客",
+  "status_column": "是否提交",
+  "submitted_value": "填写已提交",
+  "key_columns": ["订单ID", "用户ID（乘客ID）"],
+  "required_columns": ["统计日期", "品牌", "城市", "订单ID", "用户ID（乘客ID）", "工单描述"],
+  "image_columns": [],
+  "result_writeback": {
+    "enabled": false
+  }
+}

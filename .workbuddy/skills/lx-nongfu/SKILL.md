@@ -19,8 +19,9 @@ location: project
 | 本地 Excel 拆分 | `lx-zhutichaibiao` |
 | 飞书普通表格读写、新建 sheet | `lx-feishudocs` |
 | 通知内容 | `lx-tongzhi` |
-| 本地表格追加同步 | `lx-biaogetongbu` |
+| 本地/在线表格追加同步 | `lx-biaogetongbu` |
 | 在线表格按 key 回填 | `lx-biaogetongbu --online --online-backend feishu --mode update-by-key` |
+| 固定台账场景（背审申诉、静默乘客） | `lx-biaogetongbu/scripts/operator_workbook_sync.py` |
 
 ## 配置
 
@@ -35,11 +36,16 @@ location: project
 | `large_doc.required_key_columns` | 大文档定位键，默认必须是品牌+城市 |
 | `large_doc.brand_fields` / `city_fields` | 表头候选名 |
 | `large_doc.writeback_update_columns` | 允许回填的大文档列；空值时必须向用户确认 |
+| `operator_doc.contact_person_root_folders` | 对接人到其飞书运营主体根文件夹的映射，例如 `雷维亮: https://.../drive/folder/...` |
+| `operator_doc.operator_root_folder_url` / `operator_root_folder_token` | 单人使用时的默认运营主体根文件夹；有多人时优先用 `contact_person_root_folders` |
+| `operator_doc.operator_folder_name_template` | 运营主体文件夹名模板，默认 `{operator}-运营主体` |
 | `operator_doc.target_table_name_template` | 主体目标表名，默认 `{operator}-日常信息` |
 | `operator_doc.sheet_name_template` | 新建 sheet 命名，默认 `{date}{topic}` |
 | `notification.default_audience` / `default_format` | 默认通知对象和格式 |
 
 飞书账号和 token 不放在本 Skill 配置中，由 WorkBuddy 飞书连接器维护。本项目只使用飞书普通电子表格，不使用 Base/智能表格。
+
+大文档链接通常每次都会变化，不写进共享配置；运行时用 `--source-url` 传入。每位同事相对稳定的是“自己名下运营主体根文件夹”，应写在本地 `config/fog_config.yaml` 的 `lx_nongfu.operator_doc.contact_person_root_folders` 中，模板文件保持空。
 
 ## 触发时先确认
 
@@ -110,6 +116,43 @@ location: project
 
 `lx-tongzhi` 第一版只生成内容和校验报告，不自动发送。
 
+### 脚本入口
+
+已提供可复用命令：
+
+```bash
+python .workbuddy/skills/lx-nongfu/scripts/run_split_publish.py \
+  --source-url "https://xxx.feishu.cn/sheets/..." \
+  --contact-person "雷维亮"
+```
+
+默认是 dry-run，只预览匹配结果、目标表和各运营主体通知内容；真正写入飞书必须显式加：
+
+```bash
+  --confirmed
+```
+
+关键参数：
+
+| 参数 | 说明 |
+|---|---|
+| `--source-sheet` | 大文档 sheet 名；不填且只有一个 sheet 时自动使用 |
+| `--operator-root-folder-url` / `--operator-root-folder-token` | 临时覆盖配置中的运营主体根文件夹 |
+| `--target-sheet-name` | 目标新建 sheet 名；不填时等于大文档 sheet 名 |
+| `--header-row` | 品牌/城市表头行；不填时在前 10 行自动识别 |
+| `--if-sheet-exists fail\|skip` | 目标表已有同名 sheet 时停止或跳过，默认停止 |
+| `--preserve-header-format / --no-preserve-header-format` | 是否复制表头区域样式、合并单元格、行高和列宽，默认复制 |
+| `--refresh-existing-header-format` | 配合 `--confirmed --if-sheet-exists skip` 使用；同名 sheet 已存在时只补刷表头格式，不重写数据 |
+| `--notification-template` | 面向各运营主体的通知模板；可用 `{operator}`、`{link}`、`{sheet_name}` 等占位 |
+
+脚本输出：
+
+- JSON 执行摘要。
+- `workspace/12农夫协作/输出/` 下的摘要 JSON。
+- 每个运营主体一段可直接转发的通知 Markdown。
+
+通知正文变化时，不建议写死在配置里。默认由本脚本根据链接生成基础通知；复杂文案应继续走 `lx-tongzhi` 的 `shangjia` + `weixin` 视角生成，再通过 `--notification-template` 或 `--notification-template-file` 传给本脚本。
+
 ### 5. 回填大文档
 
 回填必须按品牌+城市定位，不允许整表覆盖。
@@ -126,8 +169,26 @@ location: project
 
 只有用户确认后才写回大文档。写回后必须再次读取对应范围验证。
 
+已提供独立回填命令：
+
+```bash
+python .workbuddy/skills/lx-nongfu/scripts/run_writeback.py \
+  --master-url "https://xxx.feishu.cn/sheets/..." \
+  --contact-person "雷维亮" \
+  --sheet-name "0610飞涨卡资源位&触达配置" \
+  --operator "方舟行武汉" \
+  --update-columns "首页侧边栏bannerID,首页开屏ID,短信ID,PushID"
+```
+
+默认 dry-run；真实写回必须加 `--confirmed`。批量回填可用 `--all-operators`。
+
+回填字段每次活动可能变化，因此优先通过 `--update-columns` 指定。`config/fog_config.yaml` 中的 `large_doc.writeback_update_columns` 只作为可选默认值；如果命令行没传且配置为空，脚本必须停止并要求指定字段，不猜测字段。
+
+默认不会用主体表空值覆盖大文档已有值；确实需要清空时才使用 `--allow-empty-overwrite`。
+
 ## 当前边界
 
-- 本地 Excel 的追加同步已有 `lx-biaogetongbu` 支持。
-- 在线飞书普通表格 A->B 按 key 更新由 `lx-biaogetongbu --online-backend feishu` 处理；写入开始后不自动换后端，失败必须报告真实原因。
+- `lx-nongfu` 只负责活动型“大文档拆分到日常信息表、生成通知、活动字段回填”的编排。
+- 背审申诉、静默乘客这类固定台账同步放在 `lx-biaogetongbu`，用 `operator_workbook_sync.py --scenario beishen_shensu|jingmo_chengke` 执行。
+- 本地 Excel 和在线飞书普通表格的追加/按 key 更新由 `lx-biaogetongbu` 处理；写入开始后不自动换后端，失败必须报告真实原因。
 - 自动发短信、push、微信消息不属于本 Skill 第一版范围。

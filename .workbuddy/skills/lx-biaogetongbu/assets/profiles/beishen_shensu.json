@@ -1,0 +1,26 @@
+{
+  "scenario_id": "beishen_shensu",
+  "description": "雷维亮对接运营主体的背审申诉普通表格同步。大表链接运行时传入或写入本机 config，不写进共享 profile。",
+  "trigger_keywords": ["同步背审申诉"],
+  "master_sheet_name": "司机背审",
+  "operator_sheet_name": "",
+  "operator_folder_template": "{operator}-运营主体",
+  "target_table_template": "{operator}-背审申诉",
+  "status_column": "是否提交",
+  "submitted_value": "填写已提交",
+  "key_columns": ["司机ID"],
+  "required_columns": ["品牌", "司机ID", "城市", "问题描述"],
+  "image_columns": [
+    "人证",
+    "承诺书",
+    "司机端审核失败原因截图",
+    "HH后台审核失败截图",
+    "身份证正面"
+  ],
+  "result_writeback": {
+    "enabled": true,
+    "column": "背审结果",
+    "source_column": "背审结果",
+    "key_columns": ["司机ID"]
+  }
+}

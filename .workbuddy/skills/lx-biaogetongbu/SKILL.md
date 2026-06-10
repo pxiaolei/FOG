@@ -9,6 +9,8 @@ trigger_keywords:
   - 从A表同步到B表
   - 静默乘客登记
   - 背审登记
+  - 同步背审申诉
+  - 同步静默乘客
   - 拆表同步
 location: project
 ---
@@ -31,6 +33,7 @@ location: project
 | 本地 Excel | `append` | 已离线验证 |
 | 本地 Excel | `update-by-key` | 已离线验证 |
 | 飞书普通电子表格 | `append` / `update-by-key` | 已接 `feishu` 后端，使用 `lx-feishudocs` 和 WorkBuddy 内置 lark-cli |
+| 飞书普通电子表格 | 运营主体固定场景 | 已接 `operator_workbook_sync.py`，支持背审申诉和静默乘客 |
 
 不直接写后台系统或数据库。
 
@@ -113,6 +116,33 @@ python .workbuddy/skills/lx-biaogetongbu/scripts/sync_table.py \
   --dry-run
 ```
 
+固定运营主体场景 dry-run：
+
+```bash
+python .workbuddy/skills/lx-biaogetongbu/scripts/operator_workbook_sync.py \
+  --scenario beishen_shensu \
+  --master-url "<背审申诉大表飞书链接>" \
+  --contact-person "雷维亮" \
+  --all-operators
+```
+
+```bash
+python .workbuddy/skills/lx-biaogetongbu/scripts/operator_workbook_sync.py \
+  --scenario jingmo_chengke \
+  --master-url "<静默乘客大表飞书链接>" \
+  --contact-person "雷维亮" \
+  --all-operators
+```
+
+默认只预览。真实写入必须显式加 `--confirmed`。
+
+固定场景行为：
+
+- `beishen_shensu`：读取 `{运营主体}-背审申诉`，按 `司机ID` 防重复追加到大表；写入后给来源行写 `是否提交=填写已提交`；大表 `背审结果` 有值时回填来源表同名列。
+- `jingmo_chengke`：读取 `{运营主体}-静默乘客`，按 `订单ID + 用户ID（乘客ID）` 防重复追加到大表；写入后给来源行写 `是否提交=填写已提交`。
+- 来源表缺少 `是否提交` 表头时，confirmed 写入会在来源表下一空表头列补上该列。
+- 背审图片列如果属于本次要追加的行，脚本会阻断 confirmed 写入，避免把图片/富文本当纯文本丢失。已存在于大表、仅补提交状态的行不会因图片阻断。
+
 ## 参数说明
 
 | 参数 | 说明 |
@@ -185,6 +215,10 @@ python .workbuddy/skills/lx-biaogetongbu/scripts/sync_table.py \
 }
 ```
 
-profile 只能保存字段规则和默认模式，不能保存真实飞书链接、token 或个人路径。
+profile 只能保存字段规则和默认模式，不能保存真实飞书链接、token 或个人路径。固定大表链接可在运行时用 `--master-url` 传入，或写入本机 `config/fog_config.yaml` 的 `lx_biaogetongbu.operator_sync.scenarios.<scenario>.master_url`。
 
-已提供示例：`assets/profiles/nongfu_update_by_key.example.json`。
+已提供：
+
+- `assets/profiles/nongfu_update_by_key.example.json`
+- `assets/profiles/beishen_shensu.json`
+- `assets/profiles/jingmo_chengke.json`
