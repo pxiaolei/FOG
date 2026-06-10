@@ -1,6 +1,6 @@
 ---
 name: lx-zhutichaibiao
-description: 按运营主体/城市/品牌拆表工具。将待拆表格按公司库 operator_brand 码表中的运营主体、城市、品牌和对接人拆分成多个独立文件，打包输出。支持拆分后发布到腾讯文档在线表格，并生成面向各运营主体的通知消息。触发词：拆主体表、主体拆表、lx-zhutichaibiao、zhutichaibiao、按运营主体拆、按城市拆、按品牌拆、纯品牌拆、生成通知、发消息给各主体。
+description: 按运营主体/城市/品牌拆表工具。将待拆表格按公司库 operator_brand 码表中的运营主体、城市、品牌和对接人拆分成多个独立文件，打包输出。支持拆分后交给 lx-nongfu / lx-feishudocs 发布到飞书普通表格，并生成面向各运营主体的通知消息。触发词：拆主体表、主体拆表、lx-zhutichaibiao、zhutichaibiao、按运营主体拆、按城市拆、按品牌拆、纯品牌拆、生成通知、发消息给各主体。
 agent_created: true
 ---
 
@@ -15,7 +15,7 @@ agent_created: true
 | 用户意图 | 触发词 | 对应阶段 |
 |---------|--------|---------|
 | 拆分表格 | 拆主体表、主体拆表、lx-zhutichaibiao、zhutichaibiao、按运营主体拆、按城市拆、按品牌拆、纯品牌拆 | **阶段一** |
-| 发布到线上 | 发布、发布到腾讯文档、推送到线上 | **阶段二** |
+| 发布到线上 | 发布、发布到飞书表格、推送到线上 | **阶段二** |
 | 生成通知 | 生成通知、发消息给各主体、通知话术 | **阶段三** |
 
 **典型流程**：拆分 →（可选）发布 →（可选）生成通知。但通知也可以不依赖发布，直接用缓存中的链接生成。
@@ -25,11 +25,11 @@ agent_created: true
 拆分是核心触发条件，发布和通知为可选分支：
 
 - **核心触发**：拆主体表、主体拆表、lx-zhutichaibiao、zhutichaibiao、按运营主体拆、按城市拆、按品牌拆、纯品牌拆
-- **独立触发**：发布、发布到腾讯文档、推送到线上（阶段二）
+- **独立触发**：发布、发布到飞书普通表格、推送到线上（阶段二）
 - **独立触发**：生成通知、发消息给各主体、通知话术（阶段三）
 
 拆分完成后，询问用户是否需要执行后续可选步骤：
-1. 「是否发布到腾讯文档？」→ 是则进入阶段二
+1. 「是否发布到飞书普通表格？」→ 是则进入阶段二
 2. 「是否需要生成通知消息？」→ 是则进入阶段三
 
 ## 核心功能
@@ -110,63 +110,53 @@ python .workbuddy/skills/lx-zhutichaibiao/scripts/split_by_zhuti.py -m <mode> -p
 
 拆分完成后，**必须逐个询问**用户是否需要执行后续可选步骤：
 
-1. 「拆分完成。是否发布到腾讯文档在线表格？」→ 确认后进入阶段二
+1. 「拆分完成。是否发布到飞书普通表格？」→ 确认后进入阶段二
 2. 「是否需要生成面向各运营主体的通知消息？」→ 确认后进入阶段三
 
 用户可能只需要其中一项，或两项都不需要。
 
 ---
 
-## 阶段二：发布到腾讯文档（本机私有可选）
+## 阶段二：发布到飞书普通表格
 
-触发词：发布、发布到腾讯文档、推送到线上。
+触发词：发布、发布到飞书表格、推送到线上。
 
-同事共享流程不包含个人版腾讯文档发布。线上协作文档统一由 `lx-nongfu` 编排，并通过 `lx-txsaasdocs` 写腾讯文档企业版。
-
-`scripts/publish_to_tdocs.py` 仅作为旧命令兼容入口：如果本机私有保留了 `lx-txdocs`，可继续调用个人版发布；分享给同事的 GitHub 模板不包含 `lx-txdocs`。
+同事共享流程统一由 `lx-nongfu` 编排，并通过 `lx-feishudocs` 写飞书普通表格。
 
 ### 前置条件
 
-- 本机存在私有目录 `.workbuddy/skills/lx-txdocs`
-- `config/fog_config.yaml` 中已配置 `lx_txdocs.tdocs.root_folder_id`
-- `config/fog_config.yaml` 中已配置 `lx_txdocs.tdocs.openapi.client_id`、`access_token`、`open_id`
-- 私有缓存 `.workbuddy/skills/lx-txdocs/assets/entity_cache.json` 已建立
+- WorkBuddy 已安装并绑定飞书连接器，`lark-cli auth status` 能看到正确飞书账号。
+- 项目存在 `.workbuddy/skills/lx-feishudocs`。
+- `config/fog_config.yaml` 中 `lx_feishudocs.spreadsheet_type` 为 `sheets`。
+- 如需写入固定父目录，先配置 `lx_feishudocs.default_folder_token` 或业务侧目标 folder token。
 
-### 发布流程（一条命令）
+### 共享发布流程
 
-#### 步骤 1：预览
+1. 拆分完成后，先把输出文件和目标 sheet 名交给 `lx-nongfu` 编排。
+2. `lx-nongfu` 按运营主体确定目标普通表格和 sheet 名。
+3. 写入前必须 dry-run，确认每个主体的行列规模、目标表格和 sheet 名。
+4. 用户确认后，通过 `lx-feishudocs` 写入飞书普通表格。
+5. 写入后再次读回验证，并把飞书普通表格链接用于通知。
 
-```bash
-python .workbuddy/skills/lx-txdocs/scripts/publish_excel_folder.py \
-  <输出目录> --sheet-name <Sheet名称> --dry-run
-```
-
-展示每个运营主体的目标表格、数据行数，等待用户确认。
-
-#### 步骤 2：执行发布
+普通表格 smoke 可先单独验证：
 
 ```bash
-python .workbuddy/skills/lx-txdocs/scripts/publish_excel_folder.py \
-  <输出目录> --sheet-name <Sheet名称>
+python .workbuddy/skills/lx-feishudocs/scripts/feishu_sheets.py smoke --dry-run
 ```
-
-**注意**：`--sheet-name` 为必填参数，示例中的 `0529司机明细` 仅为历史参考。实际使用时应根据拆分场景指定有意义的 Sheet 名称（如 `0601司机明细`、`0530城市数据` 等）。
-
-脚本自动完成：读取本地 Excel → `add_sheet` → `write_range_auto` → 输出 sheet_id 列表。
 
 ### 错误处理
 
-- **本机没有 lx-txdocs**：说明个人版发布不是共享流程，改用 `lx-nongfu` / `lx-txsaasdocs`
-- **Open API 凭证未配置**：提示补本机私有 `lx_txdocs` 配置
-- **实体缓存缺失**：提示运行 `publish_excel_folder.py --refresh-cache`，然后通过腾讯文档页面或已授权 API 查询补充
-- **写入中途失败**：已完成的 sheet 不回滚，脚本输出各实体状态汇总
+- **未安装或未授权飞书连接器**：先运行 `lx-feishudocs` 的 `status` 或 `smoke --dry-run` 检查。
+- **目标普通表格或 sheet 不存在**：由 `lx-nongfu` / `lx-feishudocs` 先创建或提示用户确认目标。
+- **实体缓存缺失**：检查 `lx-feishudocs` 缓存或按飞书实际目录重新查询。
+- **写入中途失败**：已完成的 sheet 不回滚，脚本输出各实体状态汇总。
 
 ---
 ## 阶段三：生成通知消息（可选，可独立触发）
 
 触发词：生成通知、发消息给各主体、通知话术。
 
-不依赖阶段一或阶段二。若使用企业版协作流程，通知链接由 `lx-nongfu` / `lx-txsaasdocs` 的企业版目标表提供；若本机继续使用个人版兼容流程，可读取私有 `lx-txdocs/assets/entity_cache.json`。
+不依赖阶段一或阶段二。通知链接由 `lx-nongfu` / `lx-feishudocs` 的飞书普通表格提供。
 
 发布完成后，用户通常需要将数据链接发送给各运营主体/商家。此阶段将平台发给内部的通知话术，转换为面向每个运营主体的个性化消息。
 
@@ -183,13 +173,13 @@ python .workbuddy/skills/lx-txdocs/scripts/publish_excel_folder.py \
 2. **转换视角**：「内部协调」口吻 → 「对商家/品牌通知」口吻
    - 「辛苦大家同步确认招商」→ 「需要贵方招商确认」
    - 「请按照同步的司机明细给商家去提报」→ 「请按照同步的司机去提报」
-3. **附加文档链接**：共享流程从企业版目标表结果读取；本机个人版兼容流程才读取 `lx-txdocs/assets/entity_cache.json`
+3. **附加文档链接**：从飞书普通表格结果读取
 4. **以运营主体名称开头**：明确标识这是发给哪个主体的
 5. **人数按需添加**：仅在平台原话提及数量或有助于说明范围时附加，不做固定模板
 
 ### 数据来源
 
-- 各运营主体的文档链接和名称：共享流程来自 `lx-nongfu` / `lx-txsaasdocs` 的企业版目标表结果；本机个人版兼容流程来自 `lx-txdocs/assets/entity_cache.json`
+- 各运营主体的文档链接和名称：来自 `lx-nongfu` / `lx-feishudocs` 的飞书普通表格结果
 
 ### 消息示例
 
@@ -209,7 +199,7 @@ python .workbuddy/skills/lx-txdocs/scripts/publish_excel_folder.py \
 
 5月先锋司机选拔6月生效，二次分配活动已下发，需要招商。
 
-可提报司机明细见文档：https://docs.qq.com/sheet/DRk1NT2hUbHZzT3R4
+可提报司机明细见文档：https://example.feishu.cn/sheets/example_token
 
 为避免重复提报，请按照同步的司机去提报。
 注：新司机体系1期4城及2期2城涉及司机不参与2次分配
@@ -225,8 +215,6 @@ lx-zhutichaibiao/
 ├── README.md                      # 使用说明
 ├── scripts/
 │   ├── split_by_zhuti.py          # 独立拆分脚本
-│   ├── publish_to_tdocs.py        # 本机私有兼容入口，有 lx-txdocs 时才可用
-│   ├── tdocs_api.py               # 兼容入口，实际调用 lxx_share.tdocs_api
 │   └── requirements.txt           # Python 依赖
 └── assets/                        # 历史目录；新配置不放这里
 ```
@@ -236,22 +224,22 @@ lx-zhutichaibiao/
 - Python 3.7+
 - openpyxl >= 3.0.0
 - pyyaml >= 5.4.0
-- requests >= 2.25.0（tdocs_api.py 依赖）
+- requests >= 2.25.0
 
 ## 注意事项
 
 - 列检测和对接人筛选函数（`find_column`/`detect_columns`/`filter_by_person`）从 `lxx_share.excel_utils` 导入，不再内联
 - 码表映射从 `lx_shujuku.load_mabiao_mapping()` 加载，不再读取本地 Excel 码表
 - 不使用 `echo` 管道跳过交互确认
-- 不在未确认时移动原表或写入腾讯文档
+- 不在未确认时移动原表或写入飞书普通表格
 - `config/fog_config.yaml` 包含用户个人路径和账号，**不应提交到 git**
-- 个人版腾讯文档 `lx-txdocs` 不进入同事共享模板；企业版协作统一走 `lx-nongfu` / `lx-txsaasdocs`
+- 线上协作统一走 `lx-nongfu` / `lx-feishudocs`
 - 码表来源固定为公司库 `operator_brand`，确保每位用户已配置自己的 dataReporting 账号
 - 多人共用项目时，确保工作目录（`输入/`、`输出/`、`原表存档/`）在同一位置，建议使用项目相对路径
 
 ## 跨 Skill 数据依赖
 
-企业版腾讯文档目标由 `lx-txsaasdocs` 和相关运行缓存维护；本机私有个人版兼容流程才会读取 `lx-txdocs/assets/entity_cache.json`：
+飞书普通表格目标由 `lx-feishudocs` 和相关运行缓存维护：
 
 | 消费方 | 依赖字段 | 用途 |
 |--------|----------|------|
@@ -259,6 +247,6 @@ lx-zhutichaibiao/
 | `lx-dapanribao` | `folder_id` | 创建日报表格时指定父文件夹 |
 
 **约束**：
-- 修改企业版目标缓存结构或路径时，需同步检查 `lx-txsaasdocs`、`lx-nongfu` 和本文件
+- 修改飞书目标缓存结构或路径时，需同步检查 `lx-feishudocs`、`lx-nongfu` 和本文件
 - 个人版 `entity_cache.json` 只作为本机兼容缓存，不进入 GitHub 分享模板
 - `lx-dapanribao` 的表格 `file_id` 独立存储在 `lx-dapanribao/assets/dailyreport_cache.json`，不与 `entity_cache.json` 混用

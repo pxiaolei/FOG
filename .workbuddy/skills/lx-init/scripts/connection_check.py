@@ -60,11 +60,11 @@ def check_config(config: dict[str, Any], project_root: Path) -> list[CheckItem]:
         _required(items, "lx_dapanribao.default_person", dailyreport.get("default_person"))
         _required(items, "lx_dapanribao.output_dir", dailyreport.get("output_dir"))
         _required(items, "lx_dapanribao.publish_backend", dailyreport.get("publish_backend"))
-        _required(items, "lx_dapanribao.enterprise_root_folder_url", dailyreport.get("enterprise_root_folder_url"))
-        _required(items, "lx_dapanribao.enterprise_root_folder_id", dailyreport.get("enterprise_root_folder_id"))
         _required(items, "lx_dapanribao.report_title_template", dailyreport.get("report_title_template"))
-        if not enabled.get("lx_txsaasdocs"):
-            _check_lx_txsaasdocs(items, config, required=False)
+        publish_backend = str(dailyreport.get("publish_backend") or "")
+        if publish_backend == "lx-feishudocs":
+            _check_lx_feishudocs(items, config, required=True)
+            _required(items, "lx_dapanribao.feishu_root_folder_token", dailyreport.get("feishu_root_folder_token"))
     else:
         items.append(CheckItem("lx_dapanribao", "skipped", "未启用"))
 
@@ -89,20 +89,10 @@ def check_config(config: dict[str, Any], project_root: Path) -> list[CheckItem]:
     else:
         items.append(CheckItem("lx_haibao", "skipped", "未启用"))
 
-    if enabled.get("lx_txdocs"):
-        tdocs = _txdocs_tdocs_config(config)
-        _required(items, "lx_txdocs.tdocs.root_folder_id", tdocs.get("root_folder_id"))
-        openapi = tdocs.get("openapi", {})
-        _required(items, "lx_txdocs.tdocs.openapi.client_id", openapi.get("client_id"))
-        _required(items, "lx_txdocs.tdocs.openapi.access_token", openapi.get("access_token"), sensitive=True)
-        _required(items, "lx_txdocs.tdocs.openapi.open_id", openapi.get("open_id"))
+    if enabled.get("lx_feishudocs"):
+        _check_lx_feishudocs(items, config, required=True)
     else:
-        items.append(CheckItem("lx_txdocs", "skipped", "未启用"))
-
-    if enabled.get("lx_txsaasdocs"):
-        _check_lx_txsaasdocs(items, config, required=True)
-    else:
-        items.append(CheckItem("lx_txsaasdocs", "skipped", "未启用"))
+        items.append(CheckItem("lx_feishudocs", "skipped", "未启用"))
 
     if not items:
         items.append(CheckItem("config", "ok", "配置结构可用"))
@@ -128,32 +118,48 @@ def _required(
         items.append(CheckItem(name, severity, "未配置"))
 
 
-def _txdocs_tdocs_config(config: dict[str, Any]) -> dict[str, Any]:
-    txdocs = config.get("lx_txdocs", {})
-    if isinstance(txdocs, dict) and isinstance(txdocs.get("tdocs"), dict):
-        return txdocs["tdocs"]
-    txwendang = config.get("lx_txwendang", {})
-    if isinstance(txwendang, dict) and isinstance(txwendang.get("tdocs"), dict):
-        return txwendang["tdocs"]
-    return config.get("lx_zhutichaibiao", {}).get("tdocs", {})
+def _workbuddy_lark_cli_path() -> Path:
+    return (
+        Path.home()
+        / ".workbuddy"
+        / "binaries"
+        / "node"
+        / "cli-connector-packages"
+        / "lib"
+        / "node_modules"
+        / "@larksuite"
+        / "cli"
+        / "bin"
+        / "lark-cli"
+    )
 
 
-def _check_lx_txsaasdocs(items: list[CheckItem], config: dict[str, Any], required: bool) -> None:
-    skill_path = Path(__file__).resolve().parents[2] / "lx-txsaasdocs" / "SKILL.md"
-    if skill_path.exists():
-        items.append(CheckItem("skill.lx-txsaasdocs", "ok", f"已安装: {skill_path}"))
-    else:
-        severity = "error" if required else "warning"
-        items.append(CheckItem("skill.lx-txsaasdocs", severity, f"未找到: {skill_path}"))
-
-    api = config.get("lx_txsaasdocs", {}).get("api", {})
-    if not isinstance(api, dict):
-        api = {}
+def _check_lx_feishudocs(items: list[CheckItem], config: dict[str, Any], required: bool) -> None:
+    skill_path = Path(__file__).resolve().parents[2] / "lx-feishudocs" / "SKILL.md"
     severity = "error" if required else "warning"
-    _required(items, "lx_txsaasdocs.api.base_url", api.get("base_url"), severity=severity)
-    _required(items, "lx_txsaasdocs.api.token_endpoint", api.get("token_endpoint"), severity=severity)
-    _required(items, "lx_txsaasdocs.api.client_id", api.get("client_id"), severity=severity)
-    _required(items, "lx_txsaasdocs.api.client_secret", api.get("client_secret"), sensitive=True, severity=severity)
+    if skill_path.exists():
+        items.append(CheckItem("skill.lx-feishudocs", "ok", f"已安装: {skill_path}"))
+    else:
+        items.append(CheckItem("skill.lx-feishudocs", severity, f"未找到: {skill_path}"))
+
+    feishu = config.get("lx_feishudocs", {})
+    if not isinstance(feishu, dict):
+        feishu = {}
+    cli_path = str(feishu.get("cli_path") or "").strip()
+    candidates = [
+        Path(cli_path).expanduser() if cli_path else None,
+        _workbuddy_lark_cli_path(),
+    ]
+    if any(path is not None and path.exists() for path in candidates):
+        items.append(CheckItem("lx_feishudocs.lark_cli", "ok", "已找到 lark-cli"))
+    else:
+        items.append(CheckItem("lx_feishudocs.lark_cli", severity, "未找到 lark-cli；请在 WorkBuddy 安装飞书连接器"))
+
+    spreadsheet_type = feishu.get("spreadsheet_type", "sheets")
+    if spreadsheet_type == "sheets":
+        items.append(CheckItem("lx_feishudocs.spreadsheet_type", "ok", "使用飞书普通电子表格"))
+    else:
+        items.append(CheckItem("lx_feishudocs.spreadsheet_type", "error", "必须是 sheets；当前需求不使用 Base/智能表格"))
 
 
 def _check_sensitive_file_permissions(project_root: Path) -> list[CheckItem]:

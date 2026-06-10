@@ -158,6 +158,6 @@
 | 日报配置 | `lx-dapanribao/scripts/config.py` |
 | 数据加载 | `lx-dapanribao/scripts/data_loader.py` |
 | 异动检测 | `lx-dapanribao/scripts/anomaly_detector.py` |
-| 腾讯文档发布 | `lx-dapanribao/scripts/tdocs_publisher.py` |
+| 飞书普通表格发布计划 | `lx-dapanribao/scripts/feishu_publisher.py` |
 | hhdata 导入 | `lx-hhdataimport/scripts/` |
 | lxdata 计算 | `lx-zhibiaojisuan/scripts/lxdata_loader.py` |

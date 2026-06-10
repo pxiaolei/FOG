@@ -1,5 +1,5 @@
 """
-日报配置：对接人、指标定义、阈值、字段列表、腾讯文档发布
+日报配置：对接人、指标定义、阈值、字段列表、飞书普通表格发布
 """
 
 import sys
@@ -73,18 +73,14 @@ def _dailyreport_value(key: str, default):
 # ── 对接人配置（同事改为自己的对接人名字）──
 DEFAULT_PERSON = _dailyreport_value("default_person", "")
 
-# ── 腾讯文档企业版发布配置 ──
-DEFAULT_TDOCS_TITLE_SUFFIX = (
+# ── 飞书普通表格发布配置 ──
+DEFAULT_REPORT_TITLE_SUFFIX = (
     _dailyreport_value("title_suffix", "大盘数据日报") or "大盘数据日报"
 )
 
-PUBLISH_BACKEND = _dailyreport_value("publish_backend", "lx-txsaasdocs") or "lx-txsaasdocs"
-ENTERPRISE_ROOT_FOLDER_URL = (
-    _dailyreport_value("enterprise_root_folder_url", "") or ""
-)
-ENTERPRISE_ROOT_FOLDER_ID = (
-    _dailyreport_value("enterprise_root_folder_id", "") or ""
-)
+PUBLISH_BACKEND = _dailyreport_value("publish_backend", "lx-feishudocs") or "lx-feishudocs"
+FEISHU_ROOT_FOLDER_URL = _dailyreport_value("feishu_root_folder_url", "") or ""
+FEISHU_ROOT_FOLDER_TOKEN = _dailyreport_value("feishu_root_folder_token", "") or ""
 OPERATOR_FOLDER_NAME_TEMPLATE = (
     _dailyreport_value("operator_folder_name_template", "{operator}-运营主体") or "{operator}-运营主体"
 )
@@ -93,7 +89,7 @@ REPORT_TITLE_TEMPLATE = (
     or "{operator}-大盘数据日报"
 )
 
-# 日报表格的企业版 file_id / sheet_id 可独立存储在 dailyreport_cache.json 中
+# 日报表格的 spreadsheet token / sheet_id 可独立存储在 dailyreport_cache.json 中
 DAILYREPORT_CACHE_PATH = (
     _skills_dir / "lx-dapanribao" / "assets" / "dailyreport_cache.json"
 )

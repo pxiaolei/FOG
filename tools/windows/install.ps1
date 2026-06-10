@@ -96,7 +96,7 @@ Write-Ok "Python 版本满足 lx-haibao 要求（>= 3.10）"
 if (-not (Test-Path $ConfigPath)) {
     Copy-Item $ConfigExamplePath $ConfigPath
     Write-Ok "已创建真实配置: config/fog_config.yaml"
-    Write-Warn "请先编辑 config/fog_config.yaml，填写 dataReporting、腾讯文档、图片 API 等个人配置。"
+    Write-Warn "请先编辑 config/fog_config.yaml，填写 dataReporting、飞书普通表格、图片 API 等个人配置。"
     Write-Warn "填写完成后再次运行 .\tools\windows\install.ps1。"
     exit 1
 }

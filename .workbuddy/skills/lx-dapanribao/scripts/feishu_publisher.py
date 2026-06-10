@@ -1,8 +1,7 @@
-"""腾讯文档企业版发布计划模块（单行表头版）。
+"""飞书普通表格发布计划模块（单行表头版）。
 
-本模块不直接调用旧版腾讯文档 OpenAPI。日报发布依赖全局
-`lx-txsaasdocs` API；脚本负责生成可执行的发布计划 JSON，
-再由 WorkBuddy/Codex 读取计划并用 `lx-txsaasdocs` 写入企业版表格。
+本模块不直接写飞书。脚本负责生成可执行的发布计划 JSON，
+再由 WorkBuddy/Codex 读取计划并用 `lx-feishudocs` 写入飞书普通表格。
 
 数据格式：
 - 单行表头：品牌 | 城市 | 完单当日值 | 完单环比 | ... | 司机取消率城市同比
@@ -32,9 +31,9 @@ if str(_skills_dir) not in sys.path:
     sys.path.insert(0, str(_skills_dir))
 
 from config import (
-    ENTERPRISE_ROOT_FOLDER_ID,
-    ENTERPRISE_ROOT_FOLDER_URL,
-    DEFAULT_TDOCS_TITLE_SUFFIX,
+    FEISHU_ROOT_FOLDER_TOKEN,
+    FEISHU_ROOT_FOLDER_URL,
+    DEFAULT_REPORT_TITLE_SUFFIX,
     MISSING_DISPLAY_VALUE,
     METRICS,
     OPERATOR_FOLDER_NAME_TEMPLATE,
@@ -43,7 +42,7 @@ from config import (
     SUB_COLUMNS,
 )
 
-DAILY_REPORT_TITLE_SUFFIX = DEFAULT_TDOCS_TITLE_SUFFIX
+DAILY_REPORT_TITLE_SUFFIX = DEFAULT_REPORT_TITLE_SUFFIX
 DECIMAL_VOLUME_METRICS = {"tph", "unit_price", "avg_orders_per_driver", "online_duration_hours"}
 
 
@@ -134,7 +133,7 @@ def _format_report_data(report_df: pd.DataFrame):
     return data_rows, total_cols
 
 
-def publish_to_tdocs(
+def publish_to_feishu(
     operator_name: str,
     date_label: str,
     report_df: pd.DataFrame,
@@ -169,8 +168,11 @@ def publish_to_tdocs(
 
     result.update({
         "publish_backend": PUBLISH_BACKEND,
-        "root_folder_url": ENTERPRISE_ROOT_FOLDER_URL,
-        "root_folder_id": ENTERPRISE_ROOT_FOLDER_ID,
+        "root_folder_url": FEISHU_ROOT_FOLDER_URL,
+        "root_folder_id": FEISHU_ROOT_FOLDER_TOKEN,
+        "feishu_root_folder_url": FEISHU_ROOT_FOLDER_URL,
+        "feishu_root_folder_token": FEISHU_ROOT_FOLDER_TOKEN,
+        "spreadsheet_type": "feishu_sheets",
         "operator_folder_name": _build_operator_folder_name(operator_name),
         "spreadsheet_title": _build_spreadsheet_title(operator_name),
         "sheet_name": date_label,
@@ -178,16 +180,16 @@ def publish_to_tdocs(
         "column_count": total_cols,
         "data_rows": data_2d,
         "instructions": [
-            "使用 lx-txsaasdocs API skill。",
-            "在 enterprise_root_folder 下按 operator_folder_name 查找运营主体文件夹。",
-            "在运营主体文件夹中查找或创建 spreadsheet_title 在线表格。",
+            "使用 lx-feishudocs Skill。",
+            "在 feishu_root_folder 下按 operator_folder_name 查找运营主体文件夹。",
+            "在运营主体文件夹中查找或创建 spreadsheet_title 飞书普通表格。",
             "在目标表格中按 sheet_name 创建或替换同名子表。",
-            "用 sheet.batch_update 写入 data_rows。",
+            "用飞书 Sheets 普通表格写入 data_rows。",
         ],
     })
 
     prefix = "[DRY RUN] " if dry_run else ""
-    print(f"  [{operator_name}] {prefix}已生成企业版发布计划: "
+    print(f"  [{operator_name}] {prefix}已生成飞书普通表格发布计划: "
           f"{result['spreadsheet_title']} / sheet={date_label}")
     return result
 
@@ -205,7 +207,7 @@ def publish_all(
     results = []
 
     for operator_name, report_df in operator_reports.items():
-        result = publish_to_tdocs(
+        result = publish_to_feishu(
             operator_name=operator_name,
             date_label=date_label,
             report_df=report_df,
@@ -223,15 +225,15 @@ def publish_all(
 
 
 def write_publish_plan(results: list[dict], date_label: str, output_dir: str | Path) -> Path:
-    """写入 lx-txsaasdocs 发布计划 JSON，供后续 API 发布步骤读取。"""
+    """写入 lx-feishudocs 发布计划 JSON，供后续飞书写入步骤读取。"""
     base = Path(output_dir)
     base.mkdir(parents=True, exist_ok=True)
     path = base / f"dapanribao_publish_plan_{date_label}.json"
     payload = {
         "schema_version": 1,
         "publish_backend": PUBLISH_BACKEND,
-        "enterprise_root_folder_url": ENTERPRISE_ROOT_FOLDER_URL,
-        "enterprise_root_folder_id": ENTERPRISE_ROOT_FOLDER_ID,
+        "feishu_root_folder_url": FEISHU_ROOT_FOLDER_URL,
+        "feishu_root_folder_token": FEISHU_ROOT_FOLDER_TOKEN,
         "target_rules": {
             "operator_folder_name_template": OPERATOR_FOLDER_NAME_TEMPLATE,
             "report_title_template": REPORT_TITLE_TEMPLATE,

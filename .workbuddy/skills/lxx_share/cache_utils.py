@@ -62,9 +62,9 @@ def versioned_entity_cache_template() -> dict[str, Any]:
         "schema_version": CACHE_SCHEMA_VERSION,
         ENTITY_CACHE_SECTION: {
             "拼哒出行": {
-                "file_id": "腾讯文档表格ID",
+                "file_id": "飞书普通表格 spreadsheet token 或旧在线表格 file_id",
                 "folder_id": "运营主体文件夹ID",
-                "url": "腾讯文档链接",
+                "url": "飞书普通表格链接",
             }
         },
     }

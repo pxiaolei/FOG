@@ -1,5 +1,5 @@
 """
-运营日报 — 编排入口（腾讯文档企业版发布计划）
+运营日报 — 编排入口（飞书普通表格发布计划）
 
 用法:
     # 为默认对接人的所有运营主体生成日报
@@ -43,7 +43,7 @@ def date_label(date_str: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="运营日报生成工具（腾讯文档企业版发布计划）",
+        description="运营日报生成工具（飞书普通表格发布计划）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -80,7 +80,7 @@ def main():
         format_anomaly_summary,
         get_anomaly_cell_map,
     )
-    from tdocs_publisher import publish_all
+    from feishu_publisher import publish_all
 
     person = args.person or DEFAULT_PERSON
     output_dir = args.output_dir or DEFAULT_OUTPUT_DIR
@@ -161,10 +161,10 @@ def main():
                 print(f"\n  ── 预览 ──")
                 print(f"  {anomaly_summary}")
 
-    # 生成腾讯文档企业版发布计划
+    # 生成飞书普通表格发布计划
     if not args.dry_run and operator_reports:
         print(f"\n{'='*60}")
-        print(f"  生成腾讯文档企业版发布计划")
+        print(f"  生成飞书普通表格发布计划")
         print(f"{'='*60}\n")
 
         results = publish_all(

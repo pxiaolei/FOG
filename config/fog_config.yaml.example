@@ -25,7 +25,7 @@ project:
 # ============================================================
 enabled_skills:
   lx_shujuku: true
-  lx_txsaasdocs: false
+  lx_feishudocs: true
   lx_zhutichaibiao: true
   lx_haibao: true
   lx_dapanribao: true
@@ -114,15 +114,15 @@ lx_haibao:
 
 # ============================================================
 # lx_dapanribao
-# 要配置什么：日报输出目录、异常阈值、腾讯文档企业版发布目标。
-# 说明：发布企业版腾讯文档时依赖 lx_txsaasdocs 的 API 凭证。
+# 要配置什么：日报输出目录、异常阈值、飞书普通表格发布目标。
+# 说明：发布飞书普通表格时依赖 WorkBuddy 飞书连接器和 lx_feishudocs。
 # ============================================================
 lx_dapanribao:
   default_person: ""
   output_dir: "workspace/03数据报表/日报"
-  publish_backend: "lx-txsaasdocs"
-  enterprise_root_folder_url: ""
-  enterprise_root_folder_id: ""
+  publish_backend: "lx-feishudocs"
+  feishu_root_folder_url: ""
+  feishu_root_folder_token: ""
   operator_folder_name_template: "{operator}-运营主体"
   report_title_template: "{operator}-大盘数据日报"
   title_suffix: "大盘数据日报"
@@ -164,7 +164,7 @@ lx_nongfu:
   operator_doc:
     target_table_name_template: "{operator}-日常信息"
     sheet_name_template: "{date}{topic}"
-    enterprise_cache_path: ".workbuddy/skills/lx-txsaasdocs/assets/enterprise_entity_cache.json"
+    feishu_cache_path: ".workbuddy/skills/lx-feishudocs/assets/feishu_sheet_cache.json"
   notification:
     default_audience: "shangjia"
     default_format: "weixin"
@@ -174,21 +174,17 @@ lx_nongfu:
     writeback_mode: "update_by_key"
 
 # ============================================================
-# lx_txsaasdocs
-# 要配置什么：腾讯文档企业版/SaaS Open API 域名、Token 端点和自建应用凭证。
-# 从哪里获取：企业管理后台自建应用；没有凭证时保持空值，相关发布能力不可用。
+# lx_feishudocs
+# 要配置什么：飞书普通电子表格后端偏好。
+# 说明：账号和 token 由 WorkBuddy 飞书连接器维护，本配置不保存密钥。
 # ============================================================
-lx_txsaasdocs:
-  api:
-    base_url: ""
-    token_endpoint: ""
-    client_id: ""
-    client_secret: ""
-    access_token: ""
-    token_type: ""
-    token_expires_at: 0
+lx_feishudocs:
+  cli_path: ""
+  identity: "user"
+  spreadsheet_type: "sheets"
+  default_folder_token: ""
+  cache_path: ".workbuddy/skills/lx-feishudocs/assets/feishu_sheet_cache.json"
 
-# ============================================================
 # init
 # 要配置什么：初始化和健康检查行为。
 # 说明：共享 Skill 已直接读取 fog_config.yaml，不再生成 per-Skill config.yaml。

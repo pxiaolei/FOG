@@ -180,6 +180,32 @@ def required(items: list[tuple[str, str, str]], name: str, value: Any, severity:
         add_check(items, severity, name, "未配置")
 
 
+def workbuddy_lark_cli_path() -> Path:
+    return (
+        Path.home()
+        / ".workbuddy"
+        / "binaries"
+        / "node"
+        / "cli-connector-packages"
+        / "lib"
+        / "node_modules"
+        / "@larksuite"
+        / "cli"
+        / "bin"
+        / "lark-cli"
+    )
+
+
+def lark_cli_exists(config: dict[str, Any]) -> bool:
+    feishu = config.get("lx_feishudocs", {}) if isinstance(config.get("lx_feishudocs", {}), dict) else {}
+    configured = str(feishu.get("cli_path") or "").strip()
+    if configured and Path(configured).expanduser().exists():
+        return True
+    if shutil.which("lark-cli"):
+        return True
+    return workbuddy_lark_cli_path().exists()
+
+
 def cmd_check(_: argparse.Namespace) -> int:
     if not CONFIG_PATH.exists():
         print(f"[error] config.fog_config: 不存在 {CONFIG_PATH}")
@@ -204,25 +230,22 @@ def cmd_check(_: argparse.Namespace) -> int:
         if not zhutichaibiao.get("default_persons"):
             add_check(items, "warning", "lx_zhutichaibiao.default_persons", "未配置默认对接人")
 
-    if enabled.get("lx_txdocs"):
-        txdocs = config.get("lx_txdocs", {}) or {}
-        legacy_txwendang = config.get("lx_txwendang", {}) or {}
-        tdocs = txdocs.get("tdocs") if isinstance(txdocs, dict) else {}
-        if not isinstance(tdocs, dict) or not tdocs:
-            tdocs = legacy_txwendang.get("tdocs", {}) if isinstance(legacy_txwendang, dict) else {}
-        openapi = tdocs.get("openapi", {}) if isinstance(tdocs, dict) else {}
-        required(items, "lx_txdocs.tdocs.root_folder_id", tdocs.get("root_folder_id") if isinstance(tdocs, dict) else "")
-        required(items, "lx_txdocs.tdocs.openapi.client_id", openapi.get("client_id"))
-        required(items, "lx_txdocs.tdocs.openapi.access_token", openapi.get("access_token"))
-        required(items, "lx_txdocs.tdocs.openapi.open_id", openapi.get("open_id"))
+    dailyreport = config.get("lx_dapanribao", {}) or {}
+    publish_backend = str(dailyreport.get("publish_backend") or "")
 
-    if enabled.get("lx_txsaasdocs") or enabled.get("lx_dapanribao"):
-        txsaasdocs = config.get("lx_txsaasdocs", {}) or {}
-        api = txsaasdocs.get("api", {}) if isinstance(txsaasdocs, dict) else {}
-        required(items, "lx_txsaasdocs.api.base_url", api.get("base_url"))
-        required(items, "lx_txsaasdocs.api.token_endpoint", api.get("token_endpoint"))
-        required(items, "lx_txsaasdocs.api.client_id", api.get("client_id"))
-        required(items, "lx_txsaasdocs.api.client_secret", api.get("client_secret"))
+    if enabled.get("lx_feishudocs") or publish_backend == "lx-feishudocs":
+        skill_path = PROJECT_ROOT / ".workbuddy" / "skills" / "lx-feishudocs" / "SKILL.md"
+        if skill_path.exists():
+            add_check(items, "ok", "skill.lx-feishudocs", f"已安装: {skill_path}")
+        else:
+            add_check(items, "error", "skill.lx-feishudocs", f"未找到: {skill_path}")
+        if lark_cli_exists(config):
+            add_check(items, "ok", "lx_feishudocs.lark_cli", "已找到 lark-cli")
+        else:
+            add_check(items, "warning", "lx_feishudocs.lark_cli", "未找到 lark-cli；请在 WorkBuddy 安装飞书连接器")
+        feishu = config.get("lx_feishudocs", {}) or {}
+        if isinstance(feishu, dict) and feishu.get("spreadsheet_type") not in (None, "", "sheets"):
+            add_check(items, "error", "lx_feishudocs.spreadsheet_type", "必须使用普通电子表格 sheets，不使用 Base/智能表格")
 
     if enabled.get("lx_haibao"):
         image_api = ((config.get("lx_haibao", {}) or {}).get("image_api", {}) or {})

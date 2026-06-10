@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync rows between local Excel files or Tencent Docs online sheets."""
+"""Sync rows between local Excel files or online sheets."""
 
 from __future__ import annotations
 
@@ -473,23 +473,23 @@ def a1_range(start_row: int, start_col: int, end_row: int, end_col: int) -> str:
     return f"{col_to_a1(start_col)}{start_row}:{col_to_a1(end_col)}{end_row}"
 
 
-def extract_tencent_doc_id(value: str) -> str:
+def extract_online_doc_id(value: str) -> str:
     raw = value.strip()
     if not raw:
-        raise SyncError("腾讯文档 URL / file_id 为空")
+        raise SyncError("在线表格 URL / token 为空")
     if not raw.startswith(("http://", "https://")):
         return raw
 
     parsed = urlparse(raw)
     parts = [part for part in parsed.path.split("/") if part]
-    for marker in ("sheet", "doc", "smartsheet", "slide", "mind", "flowchart"):
+    for marker in ("sheets", "spreadsheets", "sheet", "doc", "smartsheet", "slide", "mind", "flowchart"):
         if marker in parts:
             index = parts.index(marker)
             if index + 1 < len(parts):
                 return parts[index + 1]
     if parts:
         return parts[-1]
-    raise SyncError(f"无法从腾讯文档 URL 提取 file_id: {value}")
+    raise SyncError(f"无法从在线表格 URL 提取 token: {value}")
 
 
 def find_nested_key(value: Any, names: set[str]) -> Any:
@@ -610,7 +610,7 @@ def read_online_table(
     header_row: int,
     label: str,
 ) -> tuple[TableData, OnlineSheet]:
-    short_id = extract_tencent_doc_id(url_or_id)
+    short_id = extract_online_doc_id(url_or_id)
     info = client.query_file_info(short_id)
     file_id = str(find_nested_key(info, {"file_id", "fileID", "id"}) or short_id)
 
@@ -906,19 +906,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--literal", action="append", default=[], help="固定写入，格式 目标列=固定值，可重复")
     parser.add_argument("--add-missing-target-columns", action="store_true", help="B 表缺少目标列时自动追加表头")
     parser.add_argument("--allow-blank-updates", action="store_true", help="允许 update-by-key 用空值覆盖 B 表")
-    parser.add_argument("--online", action="store_true", help="使用腾讯文档在线表格后端")
+    parser.add_argument("--online", action="store_true", help="使用在线表格后端")
     parser.add_argument(
         "--online-backend",
-        choices=["auto", "mcp", "saas-api"],
-        help="线上后端：auto 先走 MCP，限流/不可用时在写入前切到 lx-txsaasdocs API；默认 auto",
+        choices=["feishu"],
+        help="线上后端：feishu 使用飞书普通表格；默认 feishu",
     )
-    parser.add_argument("--source-url", help="A 表腾讯文档 URL 或 file_id")
-    parser.add_argument("--target-url", help="B 表腾讯文档 URL 或 file_id")
+    parser.add_argument("--source-url", help="A 表在线表格 URL 或 token")
+    parser.add_argument("--target-url", help="B 表在线表格 URL 或 token")
     parser.add_argument("--source-tab", help="A 表在线 sheet 标题或 sheet_id")
     parser.add_argument("--target-tab", help="B 表在线 sheet 标题或 sheet_id")
-    parser.add_argument("--mcp-config", help="腾讯文档 SaaS MCP 配置路径，默认 ~/.workbuddy/mcp.json")
-    parser.add_argument("--mcp-server-name", help="MCP server 名称，默认 tencent-docs")
-    parser.add_argument("--saas-config-path", help="lx-txsaasdocs API 配置路径；默认读取 config/fog_config.yaml")
+    parser.add_argument("--feishu-config-path", help="lx-feishudocs 配置路径；默认读取 config/fog_config.yaml")
+    parser.add_argument("--lark-cli", help="lark-cli 路径；默认自动查找 WorkBuddy 内置 CLI")
     parser.add_argument("--timeout", type=int, default=60, help="线上 API 请求超时秒数")
     parser.add_argument("--min-interval", type=float, default=0.0, help="线上 API 调用最小间隔秒数")
     parser.add_argument("--retries", type=int, default=0, help="线上 API 重试次数")
@@ -1139,7 +1138,7 @@ def run_online(args: argparse.Namespace, profile: dict[str, Any]) -> int:
             if not args.skip_online_verify:
                 verify_online_cells(client, target_sheet.file_id, target_sheet.sheet_id, header_updates + updates)
 
-    backend_label = str(getattr(client, "backend_label", "tencent-docs"))
+    backend_label = str(getattr(client, "backend_label", "online-sheets"))
     report_path = write_report(
         report_dir,
         mode=f"{run_mode}/{mode}",

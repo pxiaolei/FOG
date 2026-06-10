@@ -117,7 +117,7 @@ python .workbuddy/skills/lx-tongzhi/scripts/check_terms.py \
 
 ## 和现有 Skill 的关系
 
-`lx-tongzhi` 是触达内容生成 Skill，不负责拆表、生成海报、发布腾讯文档或发送消息。
+`lx-tongzhi` 是触达内容生成 Skill，不负责拆表、生成海报、发布飞书表格或发送消息。
 
 可读取以下上游产物：
 
@@ -161,7 +161,7 @@ python .workbuddy/skills/lx-tongzhi/scripts/check_terms.py \
 重点：涉及范围 + 截止时间 + 需要商家执行的动作 + 链接
 ```
 
-适合接 `lx-zhutichaibiao` 的拆表汇总和腾讯文档链接。
+适合接 `lx-zhutichaibiao` 的拆表汇总和飞书表格链接。
 
 ### 线下渠道操作说明
 

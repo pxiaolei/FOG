@@ -172,7 +172,7 @@ def get_anomaly_cell_map(
 
     Returns:
         {(row_idx, col_name): "positive"|"negative"}
-        用于 tdocs_publisher 或后处理脚本标色
+        用于 feishu_publisher 发布计划标记
     """
     cell_map = {}
 

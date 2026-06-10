@@ -10,7 +10,7 @@ LXX 出行业务运营自动化 Skill 工作区。
 
 - 模板文件：[config/fog_config.yaml.example](https://github.com/pxiaolei/FOG/blob/main/config/fog_config.yaml.example)
 - 真实配置：`config/fog_config.yaml`
-- 真实配置里填写个人账号、token、目录、图片 API Key、腾讯文档企业版 API 凭证等
+- 真实配置里填写个人账号、目录、图片 API Key、飞书普通表格偏好等
 - `config/fog_config.yaml` 不进入 GitHub
 
 给 AI 的更新提示词：
@@ -57,16 +57,16 @@ FOG/
 |---|---|---|
 | `lx_shujuku` | 查询公司 dataReporting，只读访问业务表，加载 `operator_brand` 码表 | “查一下数据库”“查活动数据”“看 operator_brand” |
 | `lx-zhutichaibiao` | 按运营主体、城市、品牌拆分 Excel，生成各主体文件 | “把这个表按运营主体拆一下”“按城市拆表” |
-| `lx-txsaasdocs` | 腾讯文档企业版/SaaS API，获取 token、查文件、写智能表 | “用企业版腾讯文档 API 写入”“查这个企业版文档” |
-| `lx-biaogetongbu` | 本地 Excel 或腾讯文档企业版表格的 A 表到 B 表同步，支持按 key 回填 | “把 A 表同步到 B 表”“按品牌城市回填大文档” |
+| `lx-feishudocs` | 飞书云文档普通电子表格后端，创建、读取、写入 Feishu Sheets | “用飞书表格发布”“写入飞书普通表格” |
+| `lx-biaogetongbu` | 本地 Excel 或飞书普通表格的 A 表到 B 表同步，支持按 key 回填 | “把 A 表同步到 B 表”“按品牌城市回填大文档” |
 | `lx-tongzhi` | 按商家、司机、线下渠道生成短信、push、微信群通知和操作说明，并做禁词检查 | “生成商家通知”“写司机 push”“检查禁词” |
 | `lx-nongfu` | 农夫协作文档编排：大文档拆分到运营主体、通知填写、按品牌+城市回填大文档 | “跑农夫协作流程”“把大文档拆给各主体填写” |
-| `lx-dapanribao` | 按对接人生成运营主体日报和腾讯文档企业版发布计划 | “生成大盘日报”“做今日日报” |
+| `lx-dapanribao` | 按对接人生成运营主体日报和飞书普通表格发布计划 | “生成大盘日报”“做今日日报” |
 | `lx-haibao` | 根据城市活动 TXT 生成司机活动海报，支持 dry-run 和确认后出图 | “根据这个 TXT 生成海报”“检查海报配置” |
 | `lx-init` | 旧初始化兼容入口；新流程优先使用 `tools/fog.py` | “初始化 FOG”“检查配置” |
 | `lxx_share` | 共享 Python 基础模块，给其他 Skill 复用，不直接触发 | 不直接使用 |
 
-使用时优先用自然语言告诉 WorkBuddy 目标、文件路径、是否要 dry-run。涉及写入腾讯文档、生成图片、移动文件、回填大文档的动作，默认先预览，确认后再执行。
+使用时优先用自然语言告诉 WorkBuddy 目标、文件路径、是否要 dry-run。涉及写入飞书普通表格、生成图片、移动文件、回填大文档的动作，默认先预览，确认后再执行。
 
 ## 4. 设计原则
 
@@ -74,6 +74,6 @@ FOG/
 - **本地配置隔离**：账号、token、个人路径、默认对接人写在 `config/fog_config.yaml`，不写进 Skill。
 - **输入输出分离**：每个业务流程尽量使用 `待处理 -> 输出/已处理 + 处理日志`。
 - **原表保留**：原始文件不直接覆盖，必要时进入存档或保留备份。
-- **写入先预览**：腾讯文档写入、图片生成、批量同步、回填大文档前先 dry-run 或明确确认。
+- **写入先预览**：飞书普通表格写入、图片生成、批量同步、回填大文档前先 dry-run 或明确确认。
 - **品牌城市匹配**：涉及运营主体回填时，必须按品牌+城市定位，不能整表直接覆盖。
 - **码表在线化**：共享模板不分发本地码表 Excel，统一通过 `lx_shujuku` 查询公司库 `operator_brand`。

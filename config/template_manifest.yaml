@@ -7,7 +7,7 @@ version: 1
 managed_dirs:
   - ".workbuddy/skills/lxx_share"
   - ".workbuddy/skills/lx_shujuku"
-  - ".workbuddy/skills/lx-txsaasdocs"
+  - ".workbuddy/skills/lx-feishudocs"
   - ".workbuddy/skills/lx-zhutichaibiao"
   - ".workbuddy/skills/lx-init"
   - ".workbuddy/skills/lx-haibao"
