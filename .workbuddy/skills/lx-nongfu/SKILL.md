@@ -1,11 +1,11 @@
 ---
 name: lx-nongfu
-description: 农服/运营主体协作文档编排 Skill。用于把线下 Excel 或腾讯文档大文档按运营主体拆分到各主体的日常信息表，新建填写 sheet，生成运营主体通知，并在主体填写完成后按品牌+城市回填大文档。适用于大文档拆分、农服协作、运营主体填表、日常信息收集、主体回填、品牌城市回写等场景。
+description: 农夫/运营主体协作文档编排 Skill。用于把线下 Excel 或腾讯文档大文档按运营主体拆分到各主体的日常信息表，新建填写 sheet，生成运营主体通知，并在主体填写完成后按品牌+城市回填大文档。适用于大文档拆分、农夫协作、运营主体填表、日常信息收集、主体回填、品牌城市回写等场景。
 agent_created: true
 location: project
 ---
 
-# lx-nongfu — 农服协作文档编排
+# lx-nongfu — 农夫协作文档编排
 
 ## 定位
 
@@ -30,7 +30,7 @@ location: project
 
 | 配置项 | 用途 |
 |---|---|
-| `workspace_dir` | 农服协作处理目录，默认 `workspace/12农服协作` |
+| `workspace_dir` | 农夫协作处理目录，默认 `workspace/12农夫协作` |
 | `default_contact_persons` | 默认对接人列表；分享模板保持空，由同事自己填 |
 | `large_doc.required_key_columns` | 大文档定位键，默认必须是品牌+城市 |
 | `large_doc.brand_fields` / `city_fields` | 表头候选名 |

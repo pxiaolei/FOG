@@ -43,10 +43,10 @@ managed_files:
   - "workspace/10表格同步/待处理/.gitkeep"
   - "workspace/10表格同步/输出/.gitkeep"
   - "workspace/10表格同步/处理日志/.gitkeep"
-  - "workspace/12农服协作/.gitkeep"
-  - "workspace/12农服协作/待处理/.gitkeep"
-  - "workspace/12农服协作/输出/.gitkeep"
-  - "workspace/12农服协作/处理日志/.gitkeep"
+  - "workspace/12农夫协作/.gitkeep"
+  - "workspace/12农夫协作/待处理/.gitkeep"
+  - "workspace/12农夫协作/输出/.gitkeep"
+  - "workspace/12农夫协作/处理日志/.gitkeep"
 
 protected_paths:
   - "config/fog_config.yaml"

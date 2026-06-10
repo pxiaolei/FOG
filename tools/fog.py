@@ -96,10 +96,10 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
         resolve_path("workspace/10表格同步/待处理"),
         resolve_path("workspace/10表格同步/输出"),
         resolve_path("workspace/10表格同步/处理日志"),
-        resolve_path("workspace/12农服协作"),
-        resolve_path("workspace/12农服协作/待处理"),
-        resolve_path("workspace/12农服协作/输出"),
-        resolve_path("workspace/12农服协作/处理日志"),
+        resolve_path("workspace/12农夫协作"),
+        resolve_path("workspace/12农夫协作/待处理"),
+        resolve_path("workspace/12农夫协作/输出"),
+        resolve_path("workspace/12农夫协作/处理日志"),
     ]
 
     zhutichaibiao = config.get("lx_zhutichaibiao", {})
@@ -119,7 +119,7 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
 
     nongfu = config.get("lx_nongfu", {})
     if isinstance(nongfu, dict):
-        base = resolve_path(nongfu.get("workspace_dir"), "workspace/12农服协作")
+        base = resolve_path(nongfu.get("workspace_dir"), "workspace/12农夫协作")
         dirs.extend([base, base / "待处理", base / "输出", base / "处理日志"])
 
     unique: list[Path] = []
