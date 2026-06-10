@@ -25,7 +25,6 @@ project:
 # ============================================================
 enabled_skills:
   lx_shujuku: true
-  lx_txdocs: true
   lx_txsaasdocs: false
   lx_zhutichaibiao: true
   lx_haibao: true
@@ -173,21 +172,6 @@ lx_nongfu:
     require_dry_run: true
     require_brand_city_match: true
     writeback_mode: "update_by_key"
-
-# ============================================================
-# lx_txdocs
-# 要配置什么：个人版腾讯文档根目录和 OpenAPI 凭证。
-# 说明：只支持个人版；企业版/SaaS API 放在 lx_txsaasdocs。
-# ============================================================
-lx_txdocs:
-  tdocs:
-    root_folder_id: ""
-    openapi:
-      client_id: ""
-      client_secret: ""
-      access_token: ""
-      refresh_token: ""
-      open_id: ""
 
 # ============================================================
 # lx_txsaasdocs

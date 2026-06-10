@@ -51,7 +51,7 @@ from lxx_share.metric_definitions import daily_report_metric_definitions
 ## 配置依赖
 
 - 数据库配置：项目根目录 `config/fog_config.yaml` 的 `database` 段
-- 个人版腾讯文档 API 凭证：项目根目录 `config/fog_config.yaml` 的 `lx_txdocs.tdocs.openapi` 段
+- 个人版腾讯文档 API 凭证：仅本机私有 `lx-txdocs` 兼容流程会读取项目根目录 `config/fog_config.yaml` 的 `lx_txdocs.tdocs.openapi` 段
 - 码表：通过 `lx_shujuku` 查询 dataReporting `operator_brand`，不读取本地 Excel
 - 阈值配置：可选 `config/thresholds.yaml`，默认使用内置值
 

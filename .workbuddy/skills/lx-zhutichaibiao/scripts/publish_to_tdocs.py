@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""兼容入口：腾讯文档发布已迁移到 lx-txdocs。
+"""兼容入口：个人版腾讯文档发布依赖本机私有 lx-txdocs。
 
-保留此文件是为了让旧命令不立即失效。
+分享给同事的 GitHub 模板不包含 lx-txdocs；线上协作请走
+lx-nongfu / lx-txsaasdocs 的企业版流程。
 """
 
 import runpy
@@ -20,7 +21,10 @@ def main() -> None:
     skills_dir = _find_skills_dir()
     target = skills_dir / "lx-txdocs" / "scripts" / "publish_excel_folder.py"
     if not target.exists():
-        raise FileNotFoundError(f"lx-txdocs 发布脚本不存在: {target}")
+        raise FileNotFoundError(
+            f"本机私有 lx-txdocs 发布脚本不存在: {target}；"
+            "同事共享流程请使用 lx-nongfu / lx-txsaasdocs"
+        )
     sys.argv[0] = str(target)
     runpy.run_path(str(target), run_name="__main__")
 

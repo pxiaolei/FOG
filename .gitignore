@@ -13,6 +13,7 @@ config/码表/
 .workbuddy/skills/lx-hhgongbu/
 .workbuddy/skills/lx-hhdataimport/
 .workbuddy/skills/lx-lxdataimport/
+.workbuddy/skills/lx-txdocs/
 .workbuddy/skills/lx-txwendang/
 
 # WorkBuddy 本地记忆和运行态

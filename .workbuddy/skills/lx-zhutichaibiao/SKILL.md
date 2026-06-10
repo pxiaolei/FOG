@@ -117,17 +117,20 @@ python .workbuddy/skills/lx-zhutichaibiao/scripts/split_by_zhuti.py -m <mode> -p
 
 ---
 
-## 阶段二：发布到腾讯文档（可选，可独立触发）
+## 阶段二：发布到腾讯文档（本机私有可选）
 
 触发词：发布、发布到腾讯文档、推送到线上。
 
-此阶段调用 **`lx-txdocs`**，将本地拆分结果写入个人版腾讯文档在线表格。`scripts/publish_to_tdocs.py` 仅作为旧命令兼容入口，实际逻辑在 `lx-txdocs/scripts/publish_excel_folder.py`。
+同事共享流程不包含个人版腾讯文档发布。线上协作文档统一由 `lx-nongfu` 编排，并通过 `lx-txsaasdocs` 写腾讯文档企业版。
+
+`scripts/publish_to_tdocs.py` 仅作为旧命令兼容入口：如果本机私有保留了 `lx-txdocs`，可继续调用个人版发布；分享给同事的 GitHub 模板不包含 `lx-txdocs`。
 
 ### 前置条件
 
-- **Open API 凭证已配置**（`config/fog_config.yaml` 的 `lx_txdocs.tdocs.openapi` 段，或运行 `lx-txdocs/scripts/tdocs_api.py --setup` 写入根配置）
-- **实体缓存已建立**（`lx-txdocs/assets/entity_cache.json`）— 首次使用由管理员或已授权 API 查询后写入，后续自动读取
+- 本机存在私有目录 `.workbuddy/skills/lx-txdocs`
 - `config/fog_config.yaml` 中已配置 `lx_txdocs.tdocs.root_folder_id`
+- `config/fog_config.yaml` 中已配置 `lx_txdocs.tdocs.openapi.client_id`、`access_token`、`open_id`
+- 私有缓存 `.workbuddy/skills/lx-txdocs/assets/entity_cache.json` 已建立
 
 ### 发布流程（一条命令）
 
@@ -153,7 +156,8 @@ python .workbuddy/skills/lx-txdocs/scripts/publish_excel_folder.py \
 
 ### 错误处理
 
-- **Open API 凭证未配置**：提示运行 `lx-txdocs/scripts/tdocs_api.py --setup`
+- **本机没有 lx-txdocs**：说明个人版发布不是共享流程，改用 `lx-nongfu` / `lx-txsaasdocs`
+- **Open API 凭证未配置**：提示补本机私有 `lx_txdocs` 配置
 - **实体缓存缺失**：提示运行 `publish_excel_folder.py --refresh-cache`，然后通过腾讯文档页面或已授权 API 查询补充
 - **写入中途失败**：已完成的 sheet 不回滚，脚本输出各实体状态汇总
 
@@ -162,7 +166,7 @@ python .workbuddy/skills/lx-txdocs/scripts/publish_excel_folder.py \
 
 触发词：生成通知、发消息给各主体、通知话术。
 
-不依赖阶段一或阶段二。可直接读取 `lx-txdocs/assets/entity_cache.json` 中的链接和各主体的数据行数来生成。
+不依赖阶段一或阶段二。若使用企业版协作流程，通知链接由 `lx-nongfu` / `lx-txsaasdocs` 的企业版目标表提供；若本机继续使用个人版兼容流程，可读取私有 `lx-txdocs/assets/entity_cache.json`。
 
 发布完成后，用户通常需要将数据链接发送给各运营主体/商家。此阶段将平台发给内部的通知话术，转换为面向每个运营主体的个性化消息。
 
@@ -179,13 +183,13 @@ python .workbuddy/skills/lx-txdocs/scripts/publish_excel_folder.py \
 2. **转换视角**：「内部协调」口吻 → 「对商家/品牌通知」口吻
    - 「辛苦大家同步确认招商」→ 「需要贵方招商确认」
    - 「请按照同步的司机明细给商家去提报」→ 「请按照同步的司机去提报」
-3. **附加文档链接**：从 `lx-txdocs/assets/entity_cache.json` 读取该主体的在线表格 URL
+3. **附加文档链接**：共享流程从企业版目标表结果读取；本机个人版兼容流程才读取 `lx-txdocs/assets/entity_cache.json`
 4. **以运营主体名称开头**：明确标识这是发给哪个主体的
 5. **人数按需添加**：仅在平台原话提及数量或有助于说明范围时附加，不做固定模板
 
 ### 数据来源
 
-- 各运营主体的文档链接和名称：`lx-txdocs/assets/entity_cache.json`
+- 各运营主体的文档链接和名称：共享流程来自 `lx-nongfu` / `lx-txsaasdocs` 的企业版目标表结果；本机个人版兼容流程来自 `lx-txdocs/assets/entity_cache.json`
 
 ### 消息示例
 
@@ -221,7 +225,7 @@ lx-zhutichaibiao/
 ├── README.md                      # 使用说明
 ├── scripts/
 │   ├── split_by_zhuti.py          # 独立拆分脚本
-│   ├── publish_to_tdocs.py        # 兼容入口，实际调用 lx-txdocs
+│   ├── publish_to_tdocs.py        # 本机私有兼容入口，有 lx-txdocs 时才可用
 │   ├── tdocs_api.py               # 兼容入口，实际调用 lxx_share.tdocs_api
 │   └── requirements.txt           # Python 依赖
 └── assets/                        # 历史目录；新配置不放这里
@@ -241,13 +245,13 @@ lx-zhutichaibiao/
 - 不使用 `echo` 管道跳过交互确认
 - 不在未确认时移动原表或写入腾讯文档
 - `config/fog_config.yaml` 包含用户个人路径和账号，**不应提交到 git**
-- 个人版腾讯文档凭证、根文件夹和实体缓存归属 `lx-txdocs`
+- 个人版腾讯文档 `lx-txdocs` 不进入同事共享模板；企业版协作统一走 `lx-nongfu` / `lx-txsaasdocs`
 - 码表来源固定为公司库 `operator_brand`，确保每位用户已配置自己的 dataReporting 账号
 - 多人共用项目时，确保工作目录（`输入/`、`输出/`、`原表存档/`）在同一位置，建议使用项目相对路径
 
 ## 跨 Skill 数据依赖
 
-腾讯文档目标缓存归属 `lx-txdocs/assets/entity_cache.json`，本 Skill 只读取或通过 `lx-txdocs` 使用：
+企业版腾讯文档目标由 `lx-txsaasdocs` 和相关运行缓存维护；本机私有个人版兼容流程才会读取 `lx-txdocs/assets/entity_cache.json`：
 
 | 消费方 | 依赖字段 | 用途 |
 |--------|----------|------|
@@ -255,6 +259,6 @@ lx-zhutichaibiao/
 | `lx-dapanribao` | `folder_id` | 创建日报表格时指定父文件夹 |
 
 **约束**：
-- 修改 `entity_cache.json` 结构或路径时，需同步检查 `lx-txdocs` 和本文件
-- `entity_cache.json` 使用 `schema_version: 1` + `entities` 格式；旧扁平格式仅过渡兼容
+- 修改企业版目标缓存结构或路径时，需同步检查 `lx-txsaasdocs`、`lx-nongfu` 和本文件
+- 个人版 `entity_cache.json` 只作为本机兼容缓存，不进入 GitHub 分享模板
 - `lx-dapanribao` 的表格 `file_id` 独立存储在 `lx-dapanribao/assets/dailyreport_cache.json`，不与 `entity_cache.json` 混用

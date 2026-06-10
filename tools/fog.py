@@ -204,7 +204,7 @@ def cmd_check(_: argparse.Namespace) -> int:
         if not zhutichaibiao.get("default_persons"):
             add_check(items, "warning", "lx_zhutichaibiao.default_persons", "未配置默认对接人")
 
-    if enabled.get("lx_txdocs") or enabled.get("lx_zhutichaibiao"):
+    if enabled.get("lx_txdocs"):
         txdocs = config.get("lx_txdocs", {}) or {}
         legacy_txwendang = config.get("lx_txwendang", {}) or {}
         tdocs = txdocs.get("tdocs") if isinstance(txdocs, dict) else {}

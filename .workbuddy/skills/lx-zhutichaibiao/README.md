@@ -81,9 +81,7 @@ python scripts/split_by_zhuti.py -m 1 -p 雷维亮 -k "沉默策略活动,策略
 
 ## 发布到腾讯文档
 
-拆表完成后，可以通过 WorkBuddy 将结果发布到腾讯文档在线表格。
-发布动作已迁移到 `lx-txdocs`，个人版腾讯文档根文件夹、OpenAPI 凭证和运营主体目标缓存都由该 Skill 管理。
-详见 SKILL.md。
+拆表完成后，共享给同事的线上协作流程走 `lx-nongfu` / `lx-txsaasdocs` 写腾讯文档企业版。个人版腾讯文档 `lx-txdocs` 只作为本机私有兼容能力，不进入 GitHub 分享模板。
 
 ## 团队共享注意事项
 

@@ -34,13 +34,6 @@ def check_config(config: dict[str, Any], project_root: Path) -> list[CheckItem]:
             message="lx_dapanribao 依赖 lx_shujuku 查询日报数据，请同时启用 lx_shujuku",
         ))
 
-    if enabled.get("lx_zhutichaibiao") and not enabled.get("lx_txdocs"):
-        items.append(CheckItem(
-            name="enabled_skills.lx_txdocs",
-            status="warning",
-            message="主体拆表发布个人版腾讯文档时依赖 lx_txdocs；旧 lx_txwendang 配置只做兼容读取",
-        ))
-
     if enabled.get("lx_shujuku"):
         api = config.get("lx_shujuku", {}).get("api", {})
         _required(items, "lx_shujuku.api.base_url", api.get("base_url"), severity="error")
@@ -96,7 +89,7 @@ def check_config(config: dict[str, Any], project_root: Path) -> list[CheckItem]:
     else:
         items.append(CheckItem("lx_haibao", "skipped", "未启用"))
 
-    if enabled.get("lx_txdocs") or enabled.get("lx_zhutichaibiao"):
+    if enabled.get("lx_txdocs"):
         tdocs = _txdocs_tdocs_config(config)
         _required(items, "lx_txdocs.tdocs.root_folder_id", tdocs.get("root_folder_id"))
         openapi = tdocs.get("openapi", {})

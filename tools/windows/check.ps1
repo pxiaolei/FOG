@@ -86,7 +86,6 @@ $failed = $false
 if (-not (Test-PathRequired (Join-Path $ProjectRoot ".workbuddy") ".workbuddy 目录")) { $failed = $true }
 if (-not (Test-PathRequired (Join-Path $ProjectRoot ".workbuddy/skills/lx-init") "lx-init Skill")) { $failed = $true }
 if (-not (Test-PathRequired (Join-Path $ProjectRoot ".workbuddy/skills/lx_shujuku") "lx_shujuku Skill")) { $failed = $true }
-if (-not (Test-PathRequired (Join-Path $ProjectRoot ".workbuddy/skills/lx-txdocs") "lx-txdocs Skill")) { $failed = $true }
 if (-not (Test-PathRequired (Join-Path $ProjectRoot ".workbuddy/skills/lx-txsaasdocs") "lx-txsaasdocs Skill")) { $failed = $true }
 if (-not (Test-PathRequired (Join-Path $ProjectRoot ".workbuddy/skills/lx-zhutichaibiao") "lx-zhutichaibiao Skill")) { $failed = $true }
 if (-not (Test-PathRequired (Join-Path $ProjectRoot ".workbuddy/skills/lx-haibao") "lx-haibao Skill")) { $failed = $true }
