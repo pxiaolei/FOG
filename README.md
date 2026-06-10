@@ -4,7 +4,7 @@ LXX 出行业务运营自动化 Skill 工作区。
 
 ## 1. 后续更新说明
 
-同事如果之前已经有本地 `FOG` 项目文件夹，后续以 GitHub 仓库 `pxiaolei/FOG` 的 `main` 分支为准更新代码和共享 Skill。本地个人配置、业务文件、运行输出和缓存不要提交，也不要被更新覆盖。
+后续更新以 GitHub 仓库 `pxiaolei/FOG` 的 `main` 分支为准。更新时只同步共享代码、共享 Skill 和配置模板；本地个人配置、业务文件、运行输出和缓存都要保留。
 
 每位同事需要维护自己的真实配置：
 
@@ -13,34 +13,15 @@ LXX 出行业务运营自动化 Skill 工作区。
 - 真实配置里填写个人账号、token、目录、图片 API Key、腾讯文档企业版 API 凭证等
 - `config/fog_config.yaml` 不进入 GitHub
 
-常规更新命令：
-
-```bash
-git status --short
-git pull --ff-only
-python tools/fog.py migrate-config
-python tools/fog.py init
-python tools/fog.py check
-```
-
-Windows 首次初始化或环境检查可用：
-
-```powershell
-.\tools\windows\install.ps1
-.\tools\windows\check.ps1
-```
-
 给 AI 的更新提示词：
 
 ```text
-请在我的 FOG 项目文件夹里操作。先运行 git status --short 检查本地状态。
-以 https://github.com/pxiaolei/FOG 的 main 分支为准更新共享代码和 Skill。
-不要覆盖 config/fog_config.yaml、workspace/、.workbuddy/skills/*/assets/config.yaml、缓存和业务输出。
-如果 config/fog_config.yaml 不存在，请按 config/fog_config.yaml.example 创建后提醒我填写。
-如果我旧目录里已有配置项，请帮我把能确认的配置项迁移到 config/fog_config.yaml，但不要提交真实配置。
-如果 config/fog_config.yaml 已存在，请运行 python tools/fog.py migrate-config 补新增配置项。
-更新后运行 python tools/fog.py init 和 python tools/fog.py check。
-如果 git status 里有我自己的改动，先告诉我具体文件，不要直接覆盖。
+请在我的 FOG 项目文件夹里更新到 GitHub 仓库 pxiaolei/FOG 的 main 分支。
+更新前先检查本地有没有未提交或未同步的改动；如果有，先告诉我具体文件，不要直接覆盖。
+更新时只同步共享代码、共享 Skill 和配置模板，不要覆盖 config/fog_config.yaml、workspace/、.workbuddy/skills/*/assets/config.yaml、缓存和业务输出。
+如果 config/fog_config.yaml 不存在，请参考 config/fog_config.yaml.example 创建，并提醒我填写个人账号、token、目录和 API Key。
+如果配置模板新增了字段，请把新增字段补到 config/fog_config.yaml，保留我原来的真实配置值。
+更新完成后请做一次初始化和配置检查，并告诉我哪些项已通过、哪些项还需要我补配置。
 ```
 
 ## 2. 文件夹结构
