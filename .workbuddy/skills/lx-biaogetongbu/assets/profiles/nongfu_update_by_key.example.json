@@ -1,0 +1,19 @@
+{
+  "mode": "update-by-key",
+  "keys": [
+    "品牌",
+    "城市"
+  ],
+  "mapping": {
+    "品牌": "品牌",
+    "城市": "城市",
+    "填写结果": "填写结果",
+    "备注": "备注"
+  },
+  "update_columns": [
+    "填写结果",
+    "备注"
+  ],
+  "allow_blank_updates": false,
+  "add_missing_target_columns": false
+}

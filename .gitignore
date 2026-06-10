@@ -7,7 +7,6 @@ config/fog_config.yaml.bak
 config/personal_config.yaml
 config/personal_config.yaml.bak
 config/database.yaml
-config/template_manifest.yaml
 config/码表/
 
 # 不分享的 Skill
@@ -38,9 +37,11 @@ __pycache__/
 *.log
 .DS_Store
 
-# 文档和管理员本机导出工具
-docs/
-tools/export_template.py
+# 文档：只跟踪模板分发需要的维护文档，业务草稿和二进制文档继续忽略
+docs/*
+!docs/
+!docs/管理员维护说明.md
+!docs/模板更新与配置策略.md
 
 # 初始化、备份、压缩包和临时交付物
 .lx-init-report.md
@@ -52,7 +53,7 @@ zip/
 *.tmp
 *.tmp.*
 
-# workspace 只保留 00-09 固定文件夹结构，不提交任何业务内容
+# workspace 只保留固定目录结构，不提交任何业务内容
 workspace/**
 workspace/1*/
 !workspace/
@@ -125,3 +126,19 @@ workspace/1*/
 !workspace/09端外海报图/元数据/.gitkeep
 !workspace/09端外海报图/产出图/
 !workspace/09端外海报图/产出图/.gitkeep
+!workspace/10表格同步/
+!workspace/10表格同步/.gitkeep
+!workspace/10表格同步/待处理/
+!workspace/10表格同步/待处理/.gitkeep
+!workspace/10表格同步/输出/
+!workspace/10表格同步/输出/.gitkeep
+!workspace/10表格同步/处理日志/
+!workspace/10表格同步/处理日志/.gitkeep
+!workspace/12农服协作/
+!workspace/12农服协作/.gitkeep
+!workspace/12农服协作/待处理/
+!workspace/12农服协作/待处理/.gitkeep
+!workspace/12农服协作/输出/
+!workspace/12农服协作/输出/.gitkeep
+!workspace/12农服协作/处理日志/
+!workspace/12农服协作/处理日志/.gitkeep

@@ -96,6 +96,10 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
         resolve_path("workspace/10表格同步/待处理"),
         resolve_path("workspace/10表格同步/输出"),
         resolve_path("workspace/10表格同步/处理日志"),
+        resolve_path("workspace/12农服协作"),
+        resolve_path("workspace/12农服协作/待处理"),
+        resolve_path("workspace/12农服协作/输出"),
+        resolve_path("workspace/12农服协作/处理日志"),
     ]
 
     zhutichaibiao = config.get("lx_zhutichaibiao", {})
@@ -112,6 +116,11 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
         dirs.append(resolve_path(haibao.get("output_dir"), "workspace/09端外海报图/产出图"))
         dirs.append(resolve_path(haibao.get("meta_dir"), "workspace/09端外海报图/元数据"))
         dirs.append(resolve_path(haibao.get("tmp_dir"), "workspace/09端外海报图/临时图"))
+
+    nongfu = config.get("lx_nongfu", {})
+    if isinstance(nongfu, dict):
+        base = resolve_path(nongfu.get("workspace_dir"), "workspace/12农服协作")
+        dirs.extend([base, base / "待处理", base / "输出", base / "处理日志"])
 
     unique: list[Path] = []
     seen: set[Path] = set()
@@ -218,6 +227,25 @@ def cmd_check(_: argparse.Namespace) -> int:
             add_check(items, "ok", "lx_haibao.image_api", "至少一个 provider 已配置 API Key")
         else:
             add_check(items, "warning", "lx_haibao.image_api", "未配置图片 API Key；海报生成会不可用")
+
+    if enabled.get("lx_nongfu"):
+        nongfu = config.get("lx_nongfu", {}) or {}
+        required(items, "lx_nongfu.workspace_dir", nongfu.get("workspace_dir"), "error")
+        if not nongfu.get("default_contact_persons"):
+            add_check(items, "warning", "lx_nongfu.default_contact_persons", "未配置默认对接人")
+        large_doc = nongfu.get("large_doc", {}) if isinstance(nongfu, dict) else {}
+        keys = large_doc.get("required_key_columns", []) if isinstance(large_doc, dict) else []
+        if "品牌" in keys and "城市" in keys:
+            add_check(items, "ok", "lx_nongfu.large_doc.required_key_columns", "已配置品牌+城市定位键")
+        else:
+            add_check(items, "error", "lx_nongfu.large_doc.required_key_columns", "必须包含 品牌 和 城市")
+        operator_doc = nongfu.get("operator_doc", {}) if isinstance(nongfu, dict) else {}
+        required(items, "lx_nongfu.operator_doc.target_table_name_template", operator_doc.get("target_table_name_template"), "error")
+        sync = nongfu.get("sync", {}) if isinstance(nongfu, dict) else {}
+        if sync.get("require_brand_city_match") is False:
+            add_check(items, "error", "lx_nongfu.sync.require_brand_city_match", "必须开启品牌+城市匹配")
+        else:
+            add_check(items, "ok", "lx_nongfu.sync.require_brand_city_match", "已开启")
 
     personal_config_path = PROJECT_ROOT / "config" / "personal_config.yaml"
     for path in [CONFIG_PATH, personal_config_path]:

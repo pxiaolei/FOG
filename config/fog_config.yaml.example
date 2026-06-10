@@ -20,6 +20,8 @@ enabled_skills:
   lx_haibao: true
   # 运营日报生成；依赖 lx_shujuku 查询数据，依赖全局 tencent-saas-docs 发布企业版腾讯文档。
   lx_dapanribao: true
+  # 农服/运营主体协作文档编排；依赖拆表、腾讯文档、通知和表格同步能力。
+  lx_nongfu: true
 
 # 可选：共享日报等能力使用的 PostgreSQL 配置。没有数据库权限时保持空值即可。
 database:
@@ -97,6 +99,46 @@ lx_dapanribao:
   anomaly_threshold_volume: 0.05
   anomaly_threshold_rate: 0.02
   deep_analysis_top_k: 5
+
+lx_nongfu:
+  workspace_dir: "workspace/12农服协作"
+  # 分享模板不写个人默认对接人；个人真实配置中填中文全名，如 ["雷维亮"]。
+  default_contact_persons: []
+  large_doc:
+    required_key_columns:
+      - "品牌"
+      - "城市"
+    brand_fields:
+      - "品牌"
+      - "品牌名称"
+      - "商家"
+      - "商家名称"
+      - "合作品牌"
+      - "合作商家"
+      - "运力品牌"
+      - "brand_name"
+    city_fields:
+      - "城市"
+      - "城市名称"
+      - "注册城市"
+      - "所属城市"
+      - "所属城市名称"
+      - "城市名"
+      - "city_name"
+    header_row: 1
+    # 允许回填的大文档列。留空时每次执行必须让用户确认。
+    writeback_update_columns: []
+  operator_doc:
+    target_table_name_template: "{operator}-日常信息"
+    sheet_name_template: "{date}{topic}"
+    enterprise_cache_path: ".workbuddy/skills/lx-txwendang/assets/enterprise_entity_cache.json"
+  notification:
+    default_audience: "shangjia"
+    default_format: "weixin"
+  sync:
+    require_dry_run: true
+    require_brand_city_match: true
+    writeback_mode: "update_by_key"
 
 lx_txwendang:
   tdocs:
