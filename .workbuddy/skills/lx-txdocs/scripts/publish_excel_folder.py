@@ -31,6 +31,7 @@ from lxx_share.cache_utils import load_entity_cache, versioned_entity_cache_temp
 
 SKILL_DIR = Path(__file__).parent.parent
 CACHE_PATH = SKILL_DIR / "assets" / "entity_cache.json"
+OLD_TXWENDANG_CACHE_PATH = _skills_dir / "lx-txwendang" / "assets" / "entity_cache.json"
 LEGACY_CACHE_PATH = _skills_dir / "lx-zhutichaibiao" / "assets" / "entity_cache.json"
 
 
@@ -39,8 +40,9 @@ def resolve_cache_path(value: str | None = None) -> Path:
         return Path(value).expanduser()
     if CACHE_PATH.exists():
         return CACHE_PATH
-    if LEGACY_CACHE_PATH.exists():
-        return LEGACY_CACHE_PATH
+    for fallback in (OLD_TXWENDANG_CACHE_PATH, LEGACY_CACHE_PATH):
+        if fallback.exists():
+            return fallback
     return CACHE_PATH
 
 
@@ -286,10 +288,10 @@ def publish_folder(
 
 
 def refresh_cache_instructions() -> None:
-    print("请通过腾讯文档 MCP 或人工导航补充缓存:\n")
+    print("请通过腾讯文档页面或已授权 API 查询补充缓存:\n")
     print("  1. 打开腾讯文档根文件夹，获取各运营主体子文件夹")
     print("  2. 找到每个主体的目标在线表格")
-    print("  3. 写入 .workbuddy/skills/lx-txwendang/assets/entity_cache.json\n")
+    print("  3. 写入 .workbuddy/skills/lx-txdocs/assets/entity_cache.json\n")
     print("缓存格式:")
     print(json.dumps(versioned_entity_cache_template(), indent=2, ensure_ascii=False))
 
@@ -306,7 +308,7 @@ def sanitize_results_for_output(results: list[dict[str, Any]]) -> list[dict[str,
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="lx-txwendang 批量发布 Excel 到腾讯文档")
+    parser = argparse.ArgumentParser(description="lx-txdocs 批量发布 Excel 到个人版腾讯文档")
     parser.add_argument("folder", nargs="?", help="本地 Excel 输出目录")
     parser.add_argument("--sheet-name", "-s", help="新建 sheet 名称（单sheet模式，与 --all-sheets 互斥）")
     parser.add_argument("--all-sheets", action="store_true", help="自动发布 Excel 中所有 visible sheet（每个 sheet 以原名发布）")

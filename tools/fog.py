@@ -204,13 +204,25 @@ def cmd_check(_: argparse.Namespace) -> int:
         if not zhutichaibiao.get("default_persons"):
             add_check(items, "warning", "lx_zhutichaibiao.default_persons", "未配置默认对接人")
 
-    if enabled.get("lx_txwendang") or enabled.get("lx_zhutichaibiao"):
-        tdocs = (config.get("lx_txwendang", {}) or {}).get("tdocs", {})
+    if enabled.get("lx_txdocs") or enabled.get("lx_zhutichaibiao"):
+        txdocs = config.get("lx_txdocs", {}) or {}
+        legacy_txwendang = config.get("lx_txwendang", {}) or {}
+        tdocs = txdocs.get("tdocs") if isinstance(txdocs, dict) else {}
+        if not isinstance(tdocs, dict) or not tdocs:
+            tdocs = legacy_txwendang.get("tdocs", {}) if isinstance(legacy_txwendang, dict) else {}
         openapi = tdocs.get("openapi", {}) if isinstance(tdocs, dict) else {}
-        required(items, "lx_txwendang.tdocs.root_folder_id", tdocs.get("root_folder_id") if isinstance(tdocs, dict) else "")
-        required(items, "lx_txwendang.tdocs.openapi.client_id", openapi.get("client_id"))
-        required(items, "lx_txwendang.tdocs.openapi.access_token", openapi.get("access_token"))
-        required(items, "lx_txwendang.tdocs.openapi.open_id", openapi.get("open_id"))
+        required(items, "lx_txdocs.tdocs.root_folder_id", tdocs.get("root_folder_id") if isinstance(tdocs, dict) else "")
+        required(items, "lx_txdocs.tdocs.openapi.client_id", openapi.get("client_id"))
+        required(items, "lx_txdocs.tdocs.openapi.access_token", openapi.get("access_token"))
+        required(items, "lx_txdocs.tdocs.openapi.open_id", openapi.get("open_id"))
+
+    if enabled.get("lx_txsaasdocs") or enabled.get("lx_dapanribao"):
+        txsaasdocs = config.get("lx_txsaasdocs", {}) or {}
+        api = txsaasdocs.get("api", {}) if isinstance(txsaasdocs, dict) else {}
+        required(items, "lx_txsaasdocs.api.base_url", api.get("base_url"))
+        required(items, "lx_txsaasdocs.api.token_endpoint", api.get("token_endpoint"))
+        required(items, "lx_txsaasdocs.api.client_id", api.get("client_id"))
+        required(items, "lx_txsaasdocs.api.client_secret", api.get("client_secret"))
 
     if enabled.get("lx_haibao"):
         image_api = ((config.get("lx_haibao", {}) or {}).get("image_api", {}) or {})

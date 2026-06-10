@@ -32,7 +32,7 @@ if str(_scripts_dir) not in sys.path:
 from lxx_share.tdocs_api import TdocsClient
 from config import METRICS, load_dailyreport_cache
 
-# 通过 TdocsClient 获取 API 凭证（默认读取 lx-txwendang 的 config.yaml）
+# 通过 TdocsClient 获取个人版 API 凭证（默认读取 lx-txdocs / config/fog_config.yaml）
 _tdocs_client = TdocsClient()
 HEADERS = {
     'Access-Token': _tdocs_client.access_token,

@@ -17,6 +17,8 @@ from urllib.parse import urlparse
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+from online_backends import OnlineBackendError, build_online_backend
+
 
 SUPPORTED_SUFFIXES = {".xlsx", ".xlsm"}
 MAX_ONLINE_ROWS = 1000
@@ -508,22 +510,10 @@ def find_nested_key(value: Any, names: set[str]) -> Any:
 
 
 def load_saas_client(args: argparse.Namespace) -> Any:
-    scripts_dir = PROJECT_ROOT / ".workbuddy" / "skills" / "lx-txwendang" / "scripts"
-    if not scripts_dir.exists():
-        raise SyncError(f"缺少 lx-txwendang SaaS MCP 封装: {scripts_dir}")
-    sys.path.insert(0, str(scripts_dir))
     try:
-        from saas_mcp import SaasDocsClient
-    except ImportError as exc:
-        raise SyncError(f"无法导入 saas_mcp.py: {exc}") from exc
-
-    return SaasDocsClient(
-        mcp_config_path=args.mcp_config,
-        timeout=args.timeout,
-        min_interval=args.min_interval,
-        retries=args.retries,
-        rate_limit_sleep=args.rate_limit_sleep,
-    )
+        return build_online_backend(args)
+    except OnlineBackendError as exc:
+        raise SyncError(str(exc)) from exc
 
 
 def select_online_sheet(properties: list[dict[str, Any]], tab: str | None, label: str) -> OnlineSheet:
@@ -917,15 +907,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--add-missing-target-columns", action="store_true", help="B 表缺少目标列时自动追加表头")
     parser.add_argument("--allow-blank-updates", action="store_true", help="允许 update-by-key 用空值覆盖 B 表")
     parser.add_argument("--online", action="store_true", help="使用腾讯文档在线表格后端")
+    parser.add_argument(
+        "--online-backend",
+        choices=["auto", "mcp", "saas-api"],
+        help="线上后端：auto 先走 MCP，限流/不可用时在写入前切到 lx-txsaasdocs API；默认 auto",
+    )
     parser.add_argument("--source-url", help="A 表腾讯文档 URL 或 file_id")
     parser.add_argument("--target-url", help="B 表腾讯文档 URL 或 file_id")
     parser.add_argument("--source-tab", help="A 表在线 sheet 标题或 sheet_id")
     parser.add_argument("--target-tab", help="B 表在线 sheet 标题或 sheet_id")
-    parser.add_argument("--mcp-config", help="腾讯文档 MCP 配置路径，默认 ~/.workbuddy/mcp.json")
-    parser.add_argument("--timeout", type=int, default=60, help="MCP 请求超时秒数")
-    parser.add_argument("--min-interval", type=float, default=0.0, help="MCP 调用最小间隔秒数")
-    parser.add_argument("--retries", type=int, default=0, help="MCP 限流重试次数")
-    parser.add_argument("--rate-limit-sleep", type=int, default=300, help="MCP 限流重试等待秒数")
+    parser.add_argument("--mcp-config", help="腾讯文档 SaaS MCP 配置路径，默认 ~/.workbuddy/mcp.json")
+    parser.add_argument("--mcp-server-name", help="MCP server 名称，默认 tencent-docs")
+    parser.add_argument("--saas-config-path", help="lx-txsaasdocs API 配置路径；默认读取 config/fog_config.yaml")
+    parser.add_argument("--timeout", type=int, default=60, help="线上 API 请求超时秒数")
+    parser.add_argument("--min-interval", type=float, default=0.0, help="线上 API 调用最小间隔秒数")
+    parser.add_argument("--retries", type=int, default=0, help="线上 API 重试次数")
+    parser.add_argument("--rate-limit-sleep", type=int, default=300, help="线上 API 限流重试等待秒数")
     parser.add_argument("--skip-online-verify", action="store_true", help="线上 confirmed 写入后跳过读回验证")
     parser.add_argument("--report-dir", default="workspace/10表格同步/处理日志", help="处理日志输出目录")
     parser.add_argument("--dry-run", action="store_true", help="只预览，不写入")
@@ -1091,6 +1088,7 @@ def run_online(args: argparse.Namespace, profile: dict[str, Any]) -> int:
     source_tab = first_value(args.source_tab, profile, "source_tab")
     target_tab = first_value(args.target_tab, profile, "target_tab")
     add_missing = bool(args.add_missing_target_columns or profile.get("add_missing_target_columns"))
+    args.online_backend = str(first_value(args.online_backend, profile, "online_backend", "auto"))
 
     client = load_saas_client(args)
     source_table, source_sheet = read_online_table(client, str(source_url), source_tab, source_header_row, "A 表")
@@ -1141,10 +1139,11 @@ def run_online(args: argparse.Namespace, profile: dict[str, Any]) -> int:
             if not args.skip_online_verify:
                 verify_online_cells(client, target_sheet.file_id, target_sheet.sheet_id, header_updates + updates)
 
+    backend_label = str(getattr(client, "backend_label", "tencent-docs"))
     report_path = write_report(
         report_dir,
         mode=f"{run_mode}/{mode}",
-        backend="tencent-docs",
+        backend=backend_label,
         source_label=str(source_url),
         target_label=str(target_url),
         output=None,
@@ -1163,7 +1162,7 @@ def run_online(args: argparse.Namespace, profile: dict[str, Any]) -> int:
         updates=header_updates + updates,
     )
 
-    print_summary(run_mode, mode, "tencent-docs", len(source_table.rows), len(target_table.rows), len(append_rows), len(updates), unchanged, skipped)
+    print_summary(run_mode, mode, backend_label, len(source_table.rows), len(target_table.rows), len(append_rows), len(updates), unchanged, skipped)
     if header_updates:
         print(f"将新增/已新增 B 表表头列: {len(header_updates)}")
     print(f"处理日志: {report_path}")
@@ -1209,7 +1208,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return run(args)
-    except SyncError as exc:
+    except (SyncError, OnlineBackendError) as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 1
 

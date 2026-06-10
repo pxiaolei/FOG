@@ -1,29 +1,42 @@
 # FOG 项目统一配置模板
 # 复制为 config/fog_config.yaml 后填写个人配置。
 # config/fog_config.yaml 包含账号、token、个人目录等敏感或本地化信息，不提交到版本控制。
+# 不分享给同事的内部 Skill 配置继续放在 config/personal_config.yaml。
 
+# ============================================================
+# version
+# 配置模板版本。升级模板时用于判断是否需要迁移。
+# ============================================================
 version: 1
 
+# ============================================================
+# project
+# 要配置什么：项目根目录和 workspace 相对目录。
+# 从哪里获取：通常 root 留空自动识别；workspace_root 默认 workspace。
+# ============================================================
 project:
-  # 留空时初始化脚本使用当前项目根目录。
   root: ""
   workspace_root: "workspace"
 
+# ============================================================
+# enabled_skills
+# 要配置什么：共享给同事的 Skill 开关。
+# 说明：内部 Skill 不放在这里，继续使用 personal_config.yaml。
+# ============================================================
 enabled_skills:
-  # 公司 dataReporting 只读查询与 operator_brand 码表。
   lx_shujuku: true
-  # 腾讯文档发布能力，供拆表、日报等业务 Skill 复用。
-  lx_txwendang: true
-  # 按运营主体/城市/品牌拆表；发布腾讯文档时调用 lx_txwendang。
+  lx_txdocs: true
+  lx_txsaasdocs: false
   lx_zhutichaibiao: true
-  # 端外海报生成。
   lx_haibao: true
-  # 运营日报生成；依赖 lx_shujuku 查询数据，依赖全局 tencent-saas-docs 发布企业版腾讯文档。
   lx_dapanribao: true
-  # 农服/运营主体协作文档编排；依赖拆表、腾讯文档、通知和表格同步能力。
   lx_nongfu: true
 
-# 可选：共享日报等能力使用的 PostgreSQL 配置。没有数据库权限时保持空值即可。
+# ============================================================
+# database
+# 要配置什么：共享能力可选使用的 PostgreSQL 连接信息。
+# 说明：没有数据库权限可保持空值；内部写库配置优先放 personal_config.yaml。
+# ============================================================
 database:
   host: ""
   port: 5432
@@ -31,6 +44,11 @@ database:
   user: ""
   password: ""
 
+# ============================================================
+# lx_shujuku
+# 要配置什么：dataReporting 查询账号和默认查询限制。
+# 从哪里获取：公司 dataReporting 账号；用于 operator_brand 码表和日报数据查询。
+# ============================================================
 lx_shujuku:
   api:
     base_url: "http://datareporting.sfczhushou.com"
@@ -40,11 +58,14 @@ lx_shujuku:
     default_limit: 100
     max_limit: 1000
 
+# ============================================================
+# lx_zhutichaibiao
+# 要配置什么：按运营主体拆表的工作目录、默认对接人、字段识别规则。
+# 说明：分享模板不写个人默认对接人；本机真实配置可填写中文全名列表。
+# ============================================================
 lx_zhutichaibiao:
   work_dir: "workspace/01主体拆表"
-  # 分享模板不写个人默认对接人；个人真实配置中填中文全名，如 ["雷维亮"]。
   default_persons: []
-  # 码表固定来自 lx_shujuku 查询 dataReporting.operator_brand。
   mabiao_source: "lx_shujuku.operator_brand"
   default:
     city_fields:
@@ -67,6 +88,11 @@ lx_zhutichaibiao:
     process_sheets: []
   special_configs: []
 
+# ============================================================
+# lx_haibao
+# 要配置什么：端外海报输出目录和图片生成 API Key。
+# 从哪里获取：火山方舟或 APIMart 控制台。
+# ============================================================
 lx_haibao:
   output_dir: "workspace/09端外海报图/产出图"
   meta_dir: "workspace/09端外海报图/元数据"
@@ -87,10 +113,15 @@ lx_haibao:
       base_url: "https://api.apimart.ai/v1"
       model: "gpt-image-2"
 
+# ============================================================
+# lx_dapanribao
+# 要配置什么：日报输出目录、异常阈值、腾讯文档企业版发布目标。
+# 说明：发布企业版腾讯文档时依赖 lx_txsaasdocs 的 API 凭证。
+# ============================================================
 lx_dapanribao:
   default_person: ""
   output_dir: "workspace/03数据报表/日报"
-  publish_backend: "tencent-saas-docs"
+  publish_backend: "lx-txsaasdocs"
   enterprise_root_folder_url: ""
   enterprise_root_folder_id: ""
   operator_folder_name_template: "{operator}-运营主体"
@@ -100,9 +131,13 @@ lx_dapanribao:
   anomaly_threshold_rate: 0.02
   deep_analysis_top_k: 5
 
+# ============================================================
+# lx_nongfu
+# 要配置什么：农服协作文档拆分、通知和回填同步的默认规则。
+# 说明：运营主体人员写入后，回填必须按品牌+城市匹配，不能整表直接覆盖。
+# ============================================================
 lx_nongfu:
   workspace_dir: "workspace/12农服协作"
-  # 分享模板不写个人默认对接人；个人真实配置中填中文全名，如 ["雷维亮"]。
   default_contact_persons: []
   large_doc:
     required_key_columns:
@@ -126,12 +161,11 @@ lx_nongfu:
       - "城市名"
       - "city_name"
     header_row: 1
-    # 允许回填的大文档列。留空时每次执行必须让用户确认。
     writeback_update_columns: []
   operator_doc:
     target_table_name_template: "{operator}-日常信息"
     sheet_name_template: "{date}{topic}"
-    enterprise_cache_path: ".workbuddy/skills/lx-txwendang/assets/enterprise_entity_cache.json"
+    enterprise_cache_path: ".workbuddy/skills/lx-txsaasdocs/assets/enterprise_entity_cache.json"
   notification:
     default_audience: "shangjia"
     default_format: "weixin"
@@ -140,17 +174,41 @@ lx_nongfu:
     require_brand_city_match: true
     writeback_mode: "update_by_key"
 
-lx_txwendang:
+# ============================================================
+# lx_txdocs
+# 要配置什么：个人版腾讯文档根目录和 OpenAPI 凭证。
+# 说明：只支持个人版；企业版/SaaS API 放在 lx_txsaasdocs。
+# ============================================================
+lx_txdocs:
   tdocs:
     root_folder_id: ""
     openapi:
       client_id: ""
-      # client_secret 不进入模板仓库；如团队决定共用，也由初始化时单独写入真实配置。
       client_secret: ""
       access_token: ""
       refresh_token: ""
       open_id: ""
 
+# ============================================================
+# lx_txsaasdocs
+# 要配置什么：腾讯文档企业版/SaaS Open API 域名、Token 端点和自建应用凭证。
+# 从哪里获取：企业管理后台自建应用；没有凭证时保持空值，相关发布能力不可用。
+# ============================================================
+lx_txsaasdocs:
+  api:
+    base_url: ""
+    token_endpoint: ""
+    client_id: ""
+    client_secret: ""
+    access_token: ""
+    token_type: ""
+    token_expires_at: 0
+
+# ============================================================
+# init
+# 要配置什么：初始化和健康检查行为。
+# 说明：共享 Skill 已直接读取 fog_config.yaml，不再生成 per-Skill config.yaml。
+# ============================================================
 init:
   write_skill_configs: false
   validate_after_write: true

@@ -34,11 +34,11 @@ def check_config(config: dict[str, Any], project_root: Path) -> list[CheckItem]:
             message="lx_dapanribao 依赖 lx_shujuku 查询日报数据，请同时启用 lx_shujuku",
         ))
 
-    if enabled.get("lx_zhutichaibiao") and not enabled.get("lx_txwendang"):
+    if enabled.get("lx_zhutichaibiao") and not enabled.get("lx_txdocs"):
         items.append(CheckItem(
-            name="enabled_skills.lx_txwendang",
+            name="enabled_skills.lx_txdocs",
             status="warning",
-            message="腾讯文档发布已迁移到 lx_txwendang；旧配置会被兼容迁移",
+            message="主体拆表发布个人版腾讯文档时依赖 lx_txdocs；旧 lx_txwendang 配置只做兼容读取",
         ))
 
     if enabled.get("lx_shujuku"):
@@ -70,7 +70,8 @@ def check_config(config: dict[str, Any], project_root: Path) -> list[CheckItem]:
         _required(items, "lx_dapanribao.enterprise_root_folder_url", dailyreport.get("enterprise_root_folder_url"))
         _required(items, "lx_dapanribao.enterprise_root_folder_id", dailyreport.get("enterprise_root_folder_id"))
         _required(items, "lx_dapanribao.report_title_template", dailyreport.get("report_title_template"))
-        _check_tencent_saas_docs(items)
+        if not enabled.get("lx_txsaasdocs"):
+            _check_lx_txsaasdocs(items, config, required=False)
     else:
         items.append(CheckItem("lx_dapanribao", "skipped", "未启用"))
 
@@ -95,15 +96,20 @@ def check_config(config: dict[str, Any], project_root: Path) -> list[CheckItem]:
     else:
         items.append(CheckItem("lx_haibao", "skipped", "未启用"))
 
-    if enabled.get("lx_txwendang") or enabled.get("lx_zhutichaibiao"):
-        tdocs = _txwendang_tdocs_config(config)
-        _required(items, "lx_txwendang.tdocs.root_folder_id", tdocs.get("root_folder_id"))
+    if enabled.get("lx_txdocs") or enabled.get("lx_zhutichaibiao"):
+        tdocs = _txdocs_tdocs_config(config)
+        _required(items, "lx_txdocs.tdocs.root_folder_id", tdocs.get("root_folder_id"))
         openapi = tdocs.get("openapi", {})
-        _required(items, "lx_txwendang.tdocs.openapi.client_id", openapi.get("client_id"))
-        _required(items, "lx_txwendang.tdocs.openapi.access_token", openapi.get("access_token"), sensitive=True)
-        _required(items, "lx_txwendang.tdocs.openapi.open_id", openapi.get("open_id"))
+        _required(items, "lx_txdocs.tdocs.openapi.client_id", openapi.get("client_id"))
+        _required(items, "lx_txdocs.tdocs.openapi.access_token", openapi.get("access_token"), sensitive=True)
+        _required(items, "lx_txdocs.tdocs.openapi.open_id", openapi.get("open_id"))
     else:
-        items.append(CheckItem("lx_txwendang", "skipped", "未启用"))
+        items.append(CheckItem("lx_txdocs", "skipped", "未启用"))
+
+    if enabled.get("lx_txsaasdocs"):
+        _check_lx_txsaasdocs(items, config, required=True)
+    else:
+        items.append(CheckItem("lx_txsaasdocs", "skipped", "未启用"))
 
     if not items:
         items.append(CheckItem("config", "ok", "配置结构可用"))
@@ -129,27 +135,32 @@ def _required(
         items.append(CheckItem(name, severity, "未配置"))
 
 
-def _txwendang_tdocs_config(config: dict[str, Any]) -> dict[str, Any]:
+def _txdocs_tdocs_config(config: dict[str, Any]) -> dict[str, Any]:
+    txdocs = config.get("lx_txdocs", {})
+    if isinstance(txdocs, dict) and isinstance(txdocs.get("tdocs"), dict):
+        return txdocs["tdocs"]
     txwendang = config.get("lx_txwendang", {})
-    if isinstance(txwendang.get("tdocs"), dict):
+    if isinstance(txwendang, dict) and isinstance(txwendang.get("tdocs"), dict):
         return txwendang["tdocs"]
     return config.get("lx_zhutichaibiao", {}).get("tdocs", {})
 
 
-def _check_tencent_saas_docs(items: list[CheckItem]) -> None:
-    skill_path = Path.home() / ".workbuddy" / "skills" / "tencent-saas-docs" / "SKILL.md"
+def _check_lx_txsaasdocs(items: list[CheckItem], config: dict[str, Any], required: bool) -> None:
+    skill_path = Path(__file__).resolve().parents[2] / "lx-txsaasdocs" / "SKILL.md"
     if skill_path.exists():
-        items.append(CheckItem(
-            "global_skill.tencent-saas-docs",
-            "ok",
-            f"已安装: {skill_path}",
-        ))
+        items.append(CheckItem("skill.lx-txsaasdocs", "ok", f"已安装: {skill_path}"))
     else:
-        items.append(CheckItem(
-            "global_skill.tencent-saas-docs",
-            "warning",
-            "未找到 ~/.workbuddy/skills/tencent-saas-docs/SKILL.md；日报只能生成发布计划，无法执行企业版写入",
-        ))
+        severity = "error" if required else "warning"
+        items.append(CheckItem("skill.lx-txsaasdocs", severity, f"未找到: {skill_path}"))
+
+    api = config.get("lx_txsaasdocs", {}).get("api", {})
+    if not isinstance(api, dict):
+        api = {}
+    severity = "error" if required else "warning"
+    _required(items, "lx_txsaasdocs.api.base_url", api.get("base_url"), severity=severity)
+    _required(items, "lx_txsaasdocs.api.token_endpoint", api.get("token_endpoint"), severity=severity)
+    _required(items, "lx_txsaasdocs.api.client_id", api.get("client_id"), severity=severity)
+    _required(items, "lx_txsaasdocs.api.client_secret", api.get("client_secret"), sensitive=True, severity=severity)
 
 
 def _check_sensitive_file_permissions(project_root: Path) -> list[CheckItem]:

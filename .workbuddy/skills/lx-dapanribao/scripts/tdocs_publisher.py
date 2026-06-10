@@ -1,8 +1,8 @@
 """腾讯文档企业版发布计划模块（单行表头版）。
 
 本模块不直接调用旧版腾讯文档 OpenAPI。日报发布依赖全局
-`tencent-saas-docs` skill/MCP；脚本负责生成可执行的发布计划 JSON，
-再由 WorkBuddy/Codex 读取计划并用 `tencent-saas-docs` 写入企业版表格。
+`lx-txsaasdocs` API；脚本负责生成可执行的发布计划 JSON，
+再由 WorkBuddy/Codex 读取计划并用 `lx-txsaasdocs` 写入企业版表格。
 
 数据格式：
 - 单行表头：品牌 | 城市 | 完单当日值 | 完单环比 | ... | 司机取消率城市同比
@@ -178,7 +178,7 @@ def publish_to_tdocs(
         "column_count": total_cols,
         "data_rows": data_2d,
         "instructions": [
-            "使用全局 tencent-saas-docs skill/MCP。",
+            "使用 lx-txsaasdocs API skill。",
             "在 enterprise_root_folder 下按 operator_folder_name 查找运营主体文件夹。",
             "在运营主体文件夹中查找或创建 spreadsheet_title 在线表格。",
             "在目标表格中按 sheet_name 创建或替换同名子表。",
@@ -223,7 +223,7 @@ def publish_all(
 
 
 def write_publish_plan(results: list[dict], date_label: str, output_dir: str | Path) -> Path:
-    """写入 tencent-saas-docs 发布计划 JSON，供后续 MCP 发布步骤读取。"""
+    """写入 lx-txsaasdocs 发布计划 JSON，供后续 API 发布步骤读取。"""
     base = Path(output_dir)
     base.mkdir(parents=True, exist_ok=True)
     path = base / f"dapanribao_publish_plan_{date_label}.json"

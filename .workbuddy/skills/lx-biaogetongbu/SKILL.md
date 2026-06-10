@@ -1,6 +1,6 @@
 ---
 name: lx-biaogetongbu
-description: 表格同步工具。用于把 A 表中的记录按字段映射同步到 B 表，覆盖静默乘客登记、背审登记、主体拆表结果同步、农服大文档按品牌城市回填等场景。支持本地 Excel append / update-by-key；支持腾讯文档在线表格 adapter，但 live MCP 可能受限额影响，线上写入必须先 dry-run。
+description: 表格同步工具。用于把 A 表中的记录按字段映射同步到 B 表，覆盖静默乘客登记、背审登记、主体拆表结果同步、农服大文档按品牌城市回填等场景。支持本地 Excel append / update-by-key；腾讯文档企业版在线表格支持 auto 后端，先走 tencent-docs-saas MCP，限流或不可用时在写入前 fallback 到 lx-txsaasdocs API。
 trigger_keywords:
   - 表格同步
   - 同步表格
@@ -30,7 +30,7 @@ location: project
 |---|---|---|
 | 本地 Excel | `append` | 已离线验证 |
 | 本地 Excel | `update-by-key` | 已离线验证 |
-| 腾讯文档在线表格 | `append` / `update-by-key` | 已实现 adapter；受 MCP 限额影响，未做 live 写入验收 |
+| 腾讯文档企业版在线表格 | `append` / `update-by-key` | 已接 `auto|mcp|saas-api` 后端；`auto` 先 MCP，限流/不可用时在写入前 fallback 到 `lx-txsaasdocs` API |
 
 不直接写后台系统或数据库。
 
@@ -43,6 +43,7 @@ location: project
 - `update-by-key` 只更新 `--update-column` 指定列，不整行覆盖。
 - `update-by-key` 默认不使用空值覆盖 B 表；确需清空时显式传 `--allow-blank-updates`。
 - 腾讯文档写入必须先 `--dry-run` 看清计划，再 `--confirmed`。
+- `auto` 后端只允许在读阶段或写入前 fallback；一旦写入请求发出，后续失败不得自动换后端，避免重复或部分写入。
 - 每次运行生成处理日志，记录来源、目标、字段映射、去重键、追加行数和跳过原因。
 
 ## 常用命令
@@ -95,11 +96,12 @@ python .workbuddy/skills/lx-biaogetongbu/scripts/sync_table.py \
   --dry-run
 ```
 
-腾讯文档在线表格 dry-run：
+腾讯文档企业版在线表格 dry-run：
 
 ```bash
 python .workbuddy/skills/lx-biaogetongbu/scripts/sync_table.py \
   --online \
+  --online-backend auto \
   --mode update-by-key \
   --source-url "https://docs.qq.com/sheet/..." \
   --target-url "https://docs.qq.com/sheet/..." \
@@ -124,7 +126,8 @@ python .workbuddy/skills/lx-biaogetongbu/scripts/sync_table.py \
 | `--key` | append 时是去重键；update-by-key 时是定位键；可重复传入，也可逗号分隔 |
 | `--update-column` | update-by-key 允许更新的 B 表列；必须显式指定 |
 | `--literal` | 固定写入目标列，格式为 `目标列=固定值` |
-| `--online` | 使用腾讯文档在线表格后端 |
+| `--online` | 使用腾讯文档企业版在线表格后端 |
+| `--online-backend` | `auto` / `mcp` / `saas-api`；默认 `auto` |
 | `--source-url` / `--target-url` | 腾讯文档 URL 或 file_id |
 | `--source-tab` / `--target-tab` | 在线表格 sheet 标题或 sheet_id |
 | `--output` | 另存为新文件；不传则正式写入目标表原文件 |
@@ -140,16 +143,22 @@ python .workbuddy/skills/lx-biaogetongbu/scripts/sync_table.py \
 
 ## 腾讯文档执行顺序
 
-线上表格执行顺序固定：
+线上表格目标执行顺序固定：
 
-1. `query_file_info` 解析 URL 短 ID 为真实 `file_id`。
-2. `sheet.get_info` 确认 sheet / tab。
-3. `sheet.get_range` 读取表头和有效数据。
-4. 生成 dry-run 计划。
-5. 用户确认后用 `sheet.batch_update` 写入。
-6. 再次 `sheet.get_range` 验证写回结果。
+1. `auto` 默认创建 MCP 后端；MCP 缺配置、限流或不可用时，在写入前尝试 `lx-txsaasdocs` API fallback。
+2. 查询文件信息，解析 URL 短 ID 为真实 `file_id`。
+3. 查询 sheet / tab 元信息。
+4. 读取表头和有效数据。
+5. 生成 dry-run 计划。
+6. 用户确认后通过当前选定后端写入。
+7. 再次读回验证写回结果。
 
-如果腾讯 MCP 返回限额错误，直接报告失败原因，不编造 dry-run 或写入结果。
+写入阶段边界：
+
+- 写入开始前可以 fallback。
+- 写入开始后不自动 fallback；如果 MCP 写入失败，直接报告失败，要求人工确认是否续跑。
+- `lx-txsaasdocs` 当前已确认企业 token、Drive 文件查询、在线智能表记录能力；普通在线表格 range 读写仍需官方端点或实测补齐。如果 fallback 到 API 后遇到 unsupported，必须报告真实原因。
+如果企业版 API adapter 未接入对应接口或腾讯接口返回错误，直接报告真实失败原因，不编造 dry-run 或写入结果。
 
 ## update-by-key 规则
 

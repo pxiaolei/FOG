@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """腾讯文档 OpenAPI 工具入口。
 
-实际实现位于 lxx_share.tdocs_api；此文件只提供 lx-txwendang 内的 CLI 入口。
+实际实现位于 lxx_share.tdocs_api；此文件只提供 lx-txdocs 内的 CLI 入口。
 """
 
 import sys

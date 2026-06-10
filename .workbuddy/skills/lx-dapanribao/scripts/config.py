@@ -78,7 +78,7 @@ DEFAULT_TDOCS_TITLE_SUFFIX = (
     _dailyreport_value("title_suffix", "大盘数据日报") or "大盘数据日报"
 )
 
-PUBLISH_BACKEND = _dailyreport_value("publish_backend", "tencent-saas-docs") or "tencent-saas-docs"
+PUBLISH_BACKEND = _dailyreport_value("publish_backend", "lx-txsaasdocs") or "lx-txsaasdocs"
 ENTERPRISE_ROOT_FOLDER_URL = (
     _dailyreport_value("enterprise_root_folder_url", "") or ""
 )

@@ -1,6 +1,6 @@
 ---
 name: lx-dapanribao
-description: 运营日报生成工具，按对接人为其负责的运营主体生成每日数据看板，含 17 个核心指标（订单/司机/财务/率值）的环比同比与城市大盘对比，自动异动检测并调用异动分析深挖根因，生成腾讯文档企业版发布计划，并依赖全局 tencent-saas-docs 写入在线表格。
+description: 运营日报生成工具，按对接人为其负责的运营主体生成每日数据看板，含 17 个核心指标（订单/司机/财务/率值）的环比同比与城市大盘对比，自动异动检测并调用异动分析深挖根因，生成腾讯文档企业版发布计划；企业版 API 写入后续由 lx-txsaasdocs 承接。
 trigger_keywords:
   - 生成日报
   - 今日日报
@@ -21,7 +21,7 @@ location: project
 3. 计算环比/同比/城市大盘对比
 4. 检测完单同比异动（偏离城市大盘 ≥ 5pp）
 5. 调用 lx-yidongfenxi 做异动归因分析（可选）
-6. 生成腾讯文档企业版发布计划，由全局 `tencent-saas-docs` 写入在线表格
+6. 生成腾讯文档企业版发布计划，后续由 `lx-txsaasdocs` API 写入在线表格
 
 ## 三步工作流
 
@@ -33,7 +33,7 @@ location: project
 
 ## 腾讯文档企业版发布机制
 
-- 发布依赖全局 WorkBuddy Skill：`tencent-saas-docs`
+- 发布依赖 WorkBuddy Skill：`lx-txsaasdocs`
 - 企业版根文件夹：`https://efe3f9566e.docs.qq.com/desktop/mydoc/folder/TlznihwNLTGuzisgAg`
 - 根文件夹下按运营主体查找子文件夹：默认 `{运营主体}-运营主体`
 - 每个运营主体一个独立表格：默认 `{运营主体}-大盘数据日报`
@@ -84,12 +84,12 @@ python3 main.py --output-dir workspace/03数据报表/日报
 
 - `lxx_share` — 共享基础模块（数据库、指标计算、码表、腾讯文档 API）
 - `lx_shujuku` — 公司库 `operator_brand` 码表来源
-- 全局 `tencent-saas-docs` — 腾讯文档企业版 MCP/Skill 发布能力
+- `lx-txsaasdocs` — 腾讯文档企业版/SaaS Open API 能力
 - `config/fog_config.yaml` — 数据库、企业版根文件夹、目标表格命名、默认对接人等配置
 
 ## 跨 Skill 发布依赖
 
-日报发布时需使用全局 `tencent-saas-docs` 操作腾讯文档企业版。
+日报发布时需使用 `lx-txsaasdocs` 操作腾讯文档企业版。
 
 **发布目标配置**：`config/fog_config.yaml` → `lx_dapanribao`
 
@@ -98,13 +98,13 @@ python3 main.py --output-dir workspace/03数据报表/日报
 - 运营主体文件夹默认按 `{operator}-运营主体` 命名；如企业版目录命名变化，修改 `operator_folder_name_template`
 - 目标表格默认按 `{operator}-大盘数据日报` 命名；如表格命名变化，修改 `report_title_template`
 - `dailyreport_cache.json` 仅可缓存企业版 `file_id` / `sheet_id`，不进入模板分发
-- 执行实际写入前，应先读取发布计划并用 `tencent-saas-docs` 查询确认目标文件夹和表格
+- 执行实际写入前，应先读取发布计划并用 `lx-txsaasdocs` 查询确认目标文件夹和表格
 
 ## 发布计划执行步骤
 
 1. 运行 `main.py --dry-run` 预览日报数据和发布计划。
 2. 确认无误后运行 `main.py` 生成完整发布计划 JSON。
-3. 使用全局 `tencent-saas-docs`：
+3. 使用 `lx-txsaasdocs`：
    - 在企业版根文件夹下查找 `{运营主体}` 文件夹；
    - 在运营主体文件夹中查找或创建 `{运营主体}-大盘数据日报` 表格；
    - 创建或替换日期 Sheet；

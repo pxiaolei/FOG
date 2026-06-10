@@ -17,10 +17,10 @@ location: project
 |---|---|
 | 码表与品牌城市归属 | `lx_shujuku.operator_brand` |
 | 本地 Excel 拆分 | `lx-zhutichaibiao` |
-| 腾讯文档企业版读写、新建 sheet | `tencent-saas-docs` / `lx-txwendang` |
+| 腾讯文档企业版读写、新建 sheet | `lx-txsaasdocs` API；普通在线表格 range 写入待接口验证 |
 | 通知内容 | `lx-tongzhi` |
 | 本地表格追加同步 | `lx-biaogetongbu` |
-| 在线表格按 key 回填 | `lx-biaogetongbu --online --mode update-by-key`；live MCP 可能受限额影响 |
+| 在线表格按 key 回填 | `lx-biaogetongbu --online --online-backend auto --mode update-by-key`；先走 MCP，写入前可 fallback 到 `lx-txsaasdocs` API |
 
 ## 配置
 
@@ -39,7 +39,7 @@ location: project
 | `operator_doc.sheet_name_template` | 新建 sheet 命名，默认 `{date}{topic}` |
 | `notification.default_audience` / `default_format` | 默认通知对象和格式 |
 
-腾讯文档 token 不放在本 Skill 配置中。腾讯文档企业版继续读取全局 `tencent-saas-docs` / `~/.workbuddy/mcp.json` 或 `TENCENT_DOCS_TOKEN`。
+腾讯文档 token 不放在本 Skill 配置中。腾讯文档企业版 API 凭证统一读取 `config/fog_config.yaml` 的 `lx_txsaasdocs` 段。
 
 ## 触发时先确认
 
@@ -89,7 +89,7 @@ location: project
 
 写入前必须 dry-run：
 
-- 确认目标表格来源于 `lx-txwendang` 企业版缓存或腾讯文档查询结果。
+- 确认目标表格来源于 `lx-txsaasdocs` 企业版缓存或腾讯文档查询结果。
 - 确认将新增的 sheet 名。
 - 确认每个主体将写入的行列规模。
 - 不覆盖同名 sheet；如同名已存在，先给出重命名或停止选项。
@@ -129,5 +129,5 @@ location: project
 ## 当前边界
 
 - 本地 Excel 的追加同步已有 `lx-biaogetongbu` 支持。
-- 在线腾讯文档 A->B 按 key 更新已由 `lx-biaogetongbu` 提供 adapter；受腾讯 MCP 限额影响，仍必须先 dry-run，失败时报告真实错误。
+- 在线腾讯文档 A->B 按 key 更新由 `lx-biaogetongbu --online-backend auto` 处理；写入开始后不自动 fallback，普通在线表格 range API 未补齐时必须报告真实 unsupported，不能模拟成功。
 - 自动发短信、push、微信消息不属于本 Skill 第一版范围。

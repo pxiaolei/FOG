@@ -65,7 +65,7 @@ def _load_config(config_path: Optional[Path] = None) -> dict:
     if not path.exists():
         raise FileNotFoundError(
             f"配置文件不存在: {path}\n"
-            f"请在 config/fog_config.yaml 的 lx_txwendang.tdocs 段填写腾讯文档配置。"
+            f"请在 config/fog_config.yaml 的 lx_txdocs.tdocs 段填写腾讯文档配置。"
         )
     return _tdocs_view_from_fog(_load_yaml_path(path))
 
@@ -77,18 +77,18 @@ def _load_yaml_path(path: Path) -> dict:
 
 
 def _save_config(config: dict, config_path: Optional[Path] = None):
-    """保存腾讯文档配置；fog_config.yaml 会写回 lx_txwendang.tdocs 段。"""
+    """保存腾讯文档配置；fog_config.yaml 会写回 lx_txdocs.tdocs 段。"""
     path = Path(config_path or CONFIG_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
     fog_config = _load_yaml_path(path) if path.exists() else {}
-    txwendang = fog_config.setdefault("lx_txwendang", {})
-    if not isinstance(txwendang, dict):
-        txwendang = {}
-        fog_config["lx_txwendang"] = txwendang
-    tdocs = txwendang.setdefault("tdocs", {})
+    txdocs = fog_config.setdefault("lx_txdocs", {})
+    if not isinstance(txdocs, dict):
+        txdocs = {}
+        fog_config["lx_txdocs"] = txdocs
+    tdocs = txdocs.setdefault("tdocs", {})
     if not isinstance(tdocs, dict):
         tdocs = {}
-        txwendang["tdocs"] = tdocs
+        txdocs["tdocs"] = tdocs
     tdocs["root_folder_id"] = config.get("腾讯文档根文件夹", "")
     tdocs["openapi"] = dict(config.get("腾讯文档OpenAPI", {}) or {})
     _save_yaml_path(path, fog_config)
@@ -104,10 +104,13 @@ def _save_yaml_path(path: Path, data: dict) -> None:
 
 
 def _tdocs_view_from_fog(fog_config: dict) -> dict:
-    txwendang = fog_config.get("lx_txwendang", {})
-    if not isinstance(txwendang, dict):
-        txwendang = {}
-    tdocs = txwendang.get("tdocs", {})
+    txdocs = fog_config.get("lx_txdocs", {})
+    if not isinstance(txdocs, dict):
+        txdocs = {}
+    legacy_txwendang = fog_config.get("lx_txwendang", {})
+    if not isinstance(legacy_txwendang, dict):
+        legacy_txwendang = {}
+    tdocs = txdocs.get("tdocs") or legacy_txwendang.get("tdocs", {})
     if not isinstance(tdocs, dict):
         tdocs = {}
     openapi = tdocs.get("openapi", {})
@@ -314,13 +317,13 @@ class TdocsClient:
         if not self.client_id:
             raise RuntimeError(
                 "未配置腾讯文档 Open API 凭证 (client_id)。\n"
-            "请在 config/fog_config.yaml 的 lx_txwendang.tdocs.openapi 段填写 client_id、access_token、open_id。\n"
+            "请在 config/fog_config.yaml 的 lx_txdocs.tdocs.openapi 段填写 client_id、access_token、open_id。\n"
                 "获取方式：访问腾讯文档开放平台获取应用ID和Token。"
             )
         if not self.access_token or not self.open_id:
             raise RuntimeError(
                 "未配置 access_token 或 open_id。\n"
-                "请在 config/fog_config.yaml 的 lx_txwendang.tdocs.openapi 段填写所有必填字段。"
+                "请在 config/fog_config.yaml 的 lx_txdocs.tdocs.openapi 段填写所有必填字段。"
             )
 
     def _refresh_access_token(self):
@@ -331,7 +334,7 @@ class TdocsClient:
         if not self.refresh_token:
             raise RuntimeError(
                 "Token 已过期且无 refresh_token（当前为简化授权模式）。\n"
-                "请重新获取 access_token 并更新 config/fog_config.yaml 中的 lx_txwendang.tdocs.openapi.access_token。"
+                "请重新获取 access_token 并更新 config/fog_config.yaml 中的 lx_txdocs.tdocs.openapi.access_token。"
             )
 
         params = {

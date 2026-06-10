@@ -1,0 +1,6 @@
+assets/config.yaml
+assets/*cache*.json
+assets/cache/
+__pycache__/
+*.pyc
+*.pyo
