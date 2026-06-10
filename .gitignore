@@ -38,11 +38,8 @@ __pycache__/
 *.log
 .DS_Store
 
-# 文档：只跟踪模板分发需要的维护文档，业务草稿和二进制文档继续忽略
-docs/*
-!docs/
-!docs/管理员维护说明.md
-!docs/模板更新与配置策略.md
+# 本地维护文档：不分享给同事
+docs/
 
 # 初始化、备份、压缩包和临时交付物
 .lx-init-report.md

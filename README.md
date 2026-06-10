@@ -5,8 +5,6 @@ LXX 子模块项目。
 ## 快速入口
 
 - 同事首次安装：https://dachela-com.feishu.cn/wiki/Ru61wMVHVi0jc5kpFogcN76nnjg
-- 管理员维护模板：`docs/管理员维护说明.md`
-- 模板更新与配置策略：`docs/模板更新与配置策略.md`
 - 数据库查询与 AI 文档证据包：`AGENT.md`
 
 ## 目录结构
@@ -52,7 +50,6 @@ FOG/
 │       ├── 待处理/
 │       ├── 输出/
 │       └── 处理日志/
-├── docs/                       # 项目文档
 ```
 
 ## 设计原则

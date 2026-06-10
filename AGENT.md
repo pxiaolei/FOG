@@ -105,7 +105,6 @@ FOG/
 │   └── 11价格监控/             # 价格跟踪
 ├── .workbuddy/skills/          # 所有 Skill（见 §2）
 ├── tools/                      # 安装/检查脚本（.ps1 + .py）
-├── docs/                       # 项目文档
 └── zip/                        # 模板打包分发
 ```
 
@@ -139,7 +138,7 @@ Pipeline 场景（拆表/导入/共补）统一约定：`待处理 → 已处理
 ### 5.4 新增/分享 Skill 的配置规则
 
 - 准备给同事使用的 Skill 不得硬编码个人账号、真实 token、固定本机路径或个人默认对接人；必须从 `config/fog_config.yaml`、环境变量或运行参数读取。
-- 新增配置项时同步更新 `config/fog_config.yaml.example`、`docs/模板更新与配置策略.md`、`tools/fog.py` 检查逻辑；不得新增面向同事的 per-Skill `assets/config.yaml` 配置入口。
+- 新增配置项时同步更新 `config/fog_config.yaml.example`、`tools/fog.py` 检查逻辑和相关 `SKILL.md`；不得新增面向同事的 per-Skill `assets/config.yaml` 配置入口。
 - 进入模板分发的 Skill 必须加入 `config/template_manifest.yaml` 的 `managed_dirs`；真实配置、缓存、证据包和业务输出必须留在 `protected_paths`。
 - 不分享给同事的内部 Skill 不写入 `config/fog_config.yaml.example`；本地个人配置统一放在 `config/personal_config.yaml`，并保持 gitignored。
 - 有写入外部系统或会产生费用的 Skill 必须提供 `--dry-run` 或显式确认参数，默认先预览。

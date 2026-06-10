@@ -20,8 +20,6 @@ managed_files:
   - ".gitignore"
   - "README.md"
   - "AGENT.md"
-  - "docs/管理员维护说明.md"
-  - "docs/模板更新与配置策略.md"
   - "tools/export_template.py"
   - "tools/fog.py"
   - "tools/windows/check.ps1"
