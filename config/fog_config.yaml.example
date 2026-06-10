@@ -91,9 +91,9 @@ lx_dapanribao:
   publish_backend: "tencent-saas-docs"
   enterprise_root_folder_url: ""
   enterprise_root_folder_id: ""
-  operator_folder_name_template: "{operator}"
-  report_title_template: "{operator}-大盘数据对比"
-  title_suffix: "大盘数据对比"
+  operator_folder_name_template: "{operator}-运营主体"
+  report_title_template: "{operator}-大盘数据日报"
+  title_suffix: "大盘数据日报"
   anomaly_threshold_volume: 0.05
   anomaly_threshold_rate: 0.02
   deep_analysis_top_k: 5

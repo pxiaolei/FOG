@@ -1,0 +1,17 @@
+# lx-txwendang 配置文件模板
+# 复制为 config.yaml 后填写个人腾讯文档凭证。
+# config.yaml 包含个人 token，请勿提交或分享。
+
+# 腾讯文档根文件夹ID：运营主体文件夹的入口。
+# 结构：根文件夹 → {运营主体}-运营主体/ → {运营主体}-日常信息
+腾讯文档根文件夹: ""
+
+# 腾讯文档 Open API V3 认证
+# client_id 由团队管理员提供。
+# access_token 和 open_id 使用个人腾讯文档账号生成。
+腾讯文档OpenAPI:
+  client_id: ""
+  client_secret: ""
+  access_token: ""
+  refresh_token: ""
+  open_id: ""

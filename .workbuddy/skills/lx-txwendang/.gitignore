@@ -1,0 +1,6 @@
+assets/config.yaml
+assets/entity_cache.json
+assets/*cache*.json
+assets/cache/
+__pycache__/
+*.pyc

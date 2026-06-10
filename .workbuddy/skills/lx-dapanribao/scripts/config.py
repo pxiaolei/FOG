@@ -75,7 +75,7 @@ DEFAULT_PERSON = _dailyreport_value("default_person", "")
 
 # ── 腾讯文档企业版发布配置 ──
 DEFAULT_TDOCS_TITLE_SUFFIX = (
-    _dailyreport_value("title_suffix", "大盘数据对比") or "大盘数据对比"
+    _dailyreport_value("title_suffix", "大盘数据日报") or "大盘数据日报"
 )
 
 PUBLISH_BACKEND = _dailyreport_value("publish_backend", "tencent-saas-docs") or "tencent-saas-docs"
@@ -86,11 +86,11 @@ ENTERPRISE_ROOT_FOLDER_ID = (
     _dailyreport_value("enterprise_root_folder_id", "") or ""
 )
 OPERATOR_FOLDER_NAME_TEMPLATE = (
-    _dailyreport_value("operator_folder_name_template", "{operator}") or "{operator}"
+    _dailyreport_value("operator_folder_name_template", "{operator}-运营主体") or "{operator}-运营主体"
 )
 REPORT_TITLE_TEMPLATE = (
     _dailyreport_value("report_title_template", "")
-    or "{operator}-大盘数据对比"
+    or "{operator}-大盘数据日报"
 )
 
 # 日报表格的企业版 file_id / sheet_id 可独立存储在 dailyreport_cache.json 中

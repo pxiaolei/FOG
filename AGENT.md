@@ -155,9 +155,9 @@ Pipeline 场景（拆表/导入/共补）统一约定：`待处理 → 已处理
 - 个人版/旧路径：拆表发布仍可使用 `lx-txwendang` / `lxx_share.tdocs_api`
 - 企业版日报：`lx-dapanribao` 依赖全局 `tencent-saas-docs`
 - 企业版日报根文件夹：`https://efe3f9566e.docs.qq.com/desktop/mydoc/folder/TlznihwNLTGuzisgAg`
-- 企业版日报目标表格：各运营主体文件夹中的 `{运营主体}-大盘数据对比`
+- 企业版日报目标表格：各运营主体文件夹中的 `{运营主体}-大盘数据日报`
 - 拆表发布目标结构：`根文件夹/ → {运营主体}-运营主体/ → {运营主体}-日常信息/`
-- 企业版日报发布目标结构：`企业版根文件夹/ → {运营主体}/ → {运营主体}-大盘数据对比`
+- 企业版日报发布目标结构：`企业版根文件夹/ → {运营主体}-运营主体/ → {运营主体}-大盘数据日报`
 - 缓存文件（含 file_id/folder_id）不入版本控制：
   - `lx-zhutichaibiao/assets/entity_cache.json` — 运营主体文件夹
   - `lx-dapanribao/assets/dailyreport_cache.json` — 日报表格
