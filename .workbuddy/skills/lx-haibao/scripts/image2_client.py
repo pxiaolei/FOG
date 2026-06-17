@@ -6,6 +6,7 @@ import binascii
 import functools
 import json
 import logging
+import mimetypes
 import os
 import sys
 import time
@@ -33,7 +34,7 @@ if str(_SKILLS_DIR) not in sys.path:
 from lxx_share.fog_config import get_section  # noqa: E402
 
 
-DEFAULT_PROVIDER_PRIMARY = "volcengine_seedream"
+DEFAULT_PROVIDER_PRIMARY = "aihubmix"
 DEFAULT_PROVIDER_FALLBACK = "apimart"
 
 DEFAULT_ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
@@ -41,6 +42,16 @@ DEFAULT_ARK_MODEL = "doubao-seedream-5-0-260128"
 DEFAULT_ARK_SIZE = "1600x2848"
 DEFAULT_ARK_RESPONSE_FORMAT = "url"
 DEFAULT_ARK_OUTPUT_FORMAT = "png"
+
+DEFAULT_AIHUBMIX_BASE_URL = "https://aihubmix.com/v1"
+DEFAULT_AIHUBMIX_TASK_BASE_URL = "https://api.aihubmix.com/v1"
+DEFAULT_AIHUBMIX_MODEL = "gpt-image-2"
+DEFAULT_AIHUBMIX_ENDPOINT = "images_edits"
+DEFAULT_AIHUBMIX_SIZE = "1024x1536"
+DEFAULT_AIHUBMIX_QUALITY = "low"
+DEFAULT_AIHUBMIX_OUTPUT_FORMAT = "png"
+DEFAULT_AIHUBMIX_STREAM = False
+DEFAULT_AIHUBMIX_PARTIAL_IMAGES = "2"
 
 DEFAULT_APIMART_BASE_URL = "https://api.apimart.ai/v1"
 DEFAULT_APIMART_MODEL = "gpt-image-2"
@@ -149,10 +160,16 @@ def _provider_bool(provider: str, key: str, env_names: list[str], default: bool)
 
 
 def _configured_provider_names() -> list[str]:
+    configured = _load_config()
+    providers_value = configured.get("providers")
+    raw_names: list[str] = []
+    if isinstance(providers_value, list):
+        raw_names.extend(str(item) for item in providers_value)
     primary = _top_config_value("provider_primary", "IMAGE_PROVIDER_PRIMARY", DEFAULT_PROVIDER_PRIMARY).strip()
     fallback = _top_config_value("provider_fallback", "IMAGE_PROVIDER_FALLBACK", DEFAULT_PROVIDER_FALLBACK).strip()
+    raw_names.extend([primary, fallback])
     names: list[str] = []
-    for name in (primary, fallback):
+    for name in raw_names:
         normalized = name.lower()
         if normalized and normalized != "none" and normalized not in names:
             names.append(normalized)
@@ -164,7 +181,9 @@ def _build_session() -> requests.Session:
         total=3,
         backoff_factor=1,
         status_forcelist=sorted(TRANSIENT_STATUS_CODES),
-        allowed_methods=["POST", "GET"],
+        # Image-generation POSTs are not idempotent. Retrying them after a read
+        # timeout can submit duplicate paid jobs.
+        allowed_methods=["GET"],
     )
     adapter = HTTPAdapter(max_retries=retry_strategy)
     session = requests.Session()
@@ -308,6 +327,15 @@ def _extract_task_id(payload: dict[str, Any]) -> str | None:
     if isinstance(data, dict):
         task_id = data.get("task_id") or data.get("id")
         return str(task_id) if task_id else None
+    output = payload.get("output")
+    if isinstance(output, list) and output:
+        item = output[0]
+        if isinstance(item, dict):
+            task_id = item.get("task_id") or item.get("taskId") or item.get("id")
+            return str(task_id) if task_id else None
+    if isinstance(output, dict):
+        task_id = output.get("task_id") or output.get("taskId") or output.get("id")
+        return str(task_id) if task_id else None
     return None
 
 
@@ -320,14 +348,46 @@ def _extract_direct_url(payload: dict[str, Any]) -> str | None:
             if isinstance(url, list):
                 return str(url[0]) if url else None
             return str(url) if url else None
+    output = payload.get("output")
+    if isinstance(output, list) and output:
+        first = output[0]
+        if isinstance(first, str):
+            return first
+        if isinstance(first, dict):
+            url = first.get("url") or first.get("image_url")
+            if isinstance(url, list):
+                return str(url[0]) if url else None
+            return str(url) if url else None
+    if isinstance(output, str):
+        return output
+    return None
+
+
+def _extract_b64_json(payload: dict[str, Any]) -> str | None:
+    data = payload.get("data")
+    if isinstance(data, list) and data:
+        item = data[0]
+        if isinstance(item, dict):
+            b64_json = item.get("b64_json")
+            return str(b64_json) if b64_json else None
     return None
 
 
 def _extract_completed_url(payload: dict[str, Any]) -> str | None:
     data = payload.get("data")
-    if not isinstance(data, dict):
-        return None
-    result = data.get("result")
+    if isinstance(data, dict):
+        result = data.get("result")
+    else:
+        result = payload.get("result") or payload.get("output")
+    if isinstance(result, list) and result:
+        first = result[0]
+        if isinstance(first, str):
+            return first
+        if isinstance(first, dict):
+            url = first.get("url") or first.get("image_url")
+            if isinstance(url, list):
+                return str(url[0]) if url else None
+            return str(url) if url else None
     if not isinstance(result, dict):
         return None
     images = result.get("images")
@@ -872,7 +932,773 @@ class APIMartProvider(ImageProvider):
         )
 
 
+class AIHubMixProvider(ImageProvider):
+    name = "aihubmix"
+
+    @property
+    def api_key(self) -> str:
+        return _provider_value(self.name, "api_key", ["AIHUBMIX_API_KEY"])
+
+    @property
+    def base_url(self) -> str:
+        return _provider_value(self.name, "base_url", ["AIHUBMIX_BASE_URL"], DEFAULT_AIHUBMIX_BASE_URL).rstrip("/")
+
+    @property
+    def task_base_url(self) -> str:
+        return _provider_value(
+            self.name,
+            "task_base_url",
+            ["AIHUBMIX_TASK_BASE_URL"],
+            DEFAULT_AIHUBMIX_TASK_BASE_URL,
+        ).rstrip("/")
+
+    @property
+    def model(self) -> str:
+        return _provider_value(self.name, "model", ["AIHUBMIX_IMAGE_MODEL"], DEFAULT_AIHUBMIX_MODEL)
+
+    @property
+    def endpoint(self) -> str:
+        return _provider_value(self.name, "endpoint", ["AIHUBMIX_IMAGE_ENDPOINT"], DEFAULT_AIHUBMIX_ENDPOINT)
+
+    @property
+    def quality(self) -> str:
+        return _provider_value(self.name, "quality", ["AIHUBMIX_IMAGE_QUALITY"], DEFAULT_AIHUBMIX_QUALITY)
+
+    @property
+    def output_format(self) -> str:
+        return _provider_value(self.name, "output_format", ["AIHUBMIX_OUTPUT_FORMAT"], DEFAULT_AIHUBMIX_OUTPUT_FORMAT)
+
+    @property
+    def stream(self) -> bool:
+        return _provider_bool(self.name, "stream", ["AIHUBMIX_IMAGE_STREAM"], DEFAULT_AIHUBMIX_STREAM)
+
+    @property
+    def partial_images(self) -> int:
+        value = _provider_value(
+            self.name,
+            "partial_images",
+            ["AIHUBMIX_PARTIAL_IMAGES"],
+            DEFAULT_AIHUBMIX_PARTIAL_IMAGES,
+        )
+        try:
+            return max(0, min(int(value), 3))
+        except ValueError:
+            return int(DEFAULT_AIHUBMIX_PARTIAL_IMAGES)
+
+    @staticmethod
+    def _request_size(size: str, resolution: str) -> str:
+        raw_size = (size or "").strip()
+        if "x" in raw_size.lower() and raw_size[0].isdigit():
+            return raw_size.lower()
+        ratio_to_portrait = {
+            "1:1": "1024x1024",
+            "4:3": "1536x1024",
+            "3:4": "1024x1536",
+            "16:9": "1536x864",
+            "9:16": "1024x1536",
+            "3:2": "1536x1024",
+            "2:3": "1024x1536",
+        }
+        if raw_size in ratio_to_portrait:
+            return ratio_to_portrait[raw_size]
+        if (resolution or "").lower() in {"1k", "2k", "4k"}:
+            return (resolution or "").upper()
+        return DEFAULT_AIHUBMIX_SIZE
+
+    def _handle_sync_response(
+        self,
+        *,
+        payload: dict[str, Any],
+        output_path: Path,
+        model_id: str,
+        request_id: str,
+        started: float,
+    ) -> dict[str, Any] | None:
+        b64_json = _extract_b64_json(payload)
+        direct_url = _extract_direct_url(payload)
+        if not b64_json and not direct_url:
+            return None
+        try:
+            if b64_json:
+                _write_b64_image(b64_json, output_path)
+            elif direct_url:
+                _download(direct_url, output_path)
+        except RuntimeError as exc:
+            raise ImageProviderError(
+                f"{self.name} 图片保存失败：{exc}",
+                provider=self.name,
+                model=model_id,
+                request_id=request_id,
+                latency_ms=_elapsed_ms(started),
+                error_code="image_save_failed",
+                fallback_allowed=True,
+            ) from exc
+        return {
+            "status": "success",
+            "filepath": str(output_path),
+            "url": direct_url or None,
+            "task_id": None,
+            "provider": self.name,
+            "model": model_id,
+            "request_id": request_id,
+            "latency_ms": _elapsed_ms(started),
+            "error_code": "",
+        }
+
+    def _handle_stream_response(
+        self,
+        *,
+        response: requests.Response,
+        output_path: Path,
+        model_id: str,
+        request_id: str,
+        started: float,
+    ) -> dict[str, Any]:
+        last_b64_json = ""
+        event_count = 0
+        last_event_type = ""
+        try:
+            for raw_line in response.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                line = raw_line.strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line.removeprefix("data:").strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    payload = json.loads(data)
+                except ValueError as exc:
+                    raise ImageProviderError(
+                        f"{self.name} 流式响应包含非 JSON 事件：{exc}",
+                        provider=self.name,
+                        model=model_id,
+                        request_id=request_id,
+                        latency_ms=_elapsed_ms(started),
+                        error_code="invalid_stream_json",
+                        fallback_allowed=False,
+                    ) from exc
+                event_count += 1
+                last_event_type = str(payload.get("type") or "")
+                error = payload.get("error")
+                if error:
+                    code, message = _extract_error(payload)
+                    raise ImageProviderError(
+                        f"{self.name} 流式响应返回错误：{message or code or error}",
+                        provider=self.name,
+                        model=model_id,
+                        request_id=request_id,
+                        latency_ms=_elapsed_ms(started),
+                        error_code=code or "stream_error",
+                        fallback_allowed=_is_transient_code(code),
+                    )
+                b64_json = payload.get("b64_json") or payload.get("partial_image_b64") or _extract_b64_json(payload)
+                if b64_json:
+                    last_b64_json = str(b64_json)
+                    logger.info(
+                        "AIHubMix 流式图片事件：type=%s partial_index=%s elapsed_ms=%d",
+                        last_event_type or "unknown",
+                        payload.get("partial_image_index"),
+                        _elapsed_ms(started),
+                    )
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RetryError) as exc:
+            raise _network_error(self.name, model_id, exc, started) from exc
+        except requests.exceptions.RequestException as exc:
+            raise _network_error(self.name, model_id, exc, started) from exc
+
+        if not last_b64_json:
+            raise ImageProviderError(
+                f"{self.name} 流式响应未返回图片数据。",
+                provider=self.name,
+                model=model_id,
+                request_id=request_id,
+                latency_ms=_elapsed_ms(started),
+                error_code="missing_stream_image",
+                fallback_allowed=True,
+            )
+        try:
+            _write_b64_image(last_b64_json, output_path)
+        except RuntimeError as exc:
+            raise ImageProviderError(
+                f"{self.name} 流式图片保存失败：{exc}",
+                provider=self.name,
+                model=model_id,
+                request_id=request_id,
+                latency_ms=_elapsed_ms(started),
+                error_code="image_save_failed",
+                fallback_allowed=True,
+            ) from exc
+        return {
+            "status": "success",
+            "filepath": str(output_path),
+            "url": None,
+            "task_id": None,
+            "provider": self.name,
+            "model": model_id,
+            "request_id": request_id,
+            "latency_ms": _elapsed_ms(started),
+            "error_code": "",
+            "stream_event_count": event_count,
+            "stream_last_event_type": last_event_type,
+        }
+
+    def _poll_task(
+        self,
+        *,
+        task_id: str,
+        headers: dict[str, str],
+        output_path: Path,
+        model_id: str,
+        request_id: str,
+        started: float,
+        request_timeout: int,
+    ) -> dict[str, Any]:
+        initial_delay = _env_int("POSTER_IMAGE_TASK_INITIAL_DELAY_SECONDS", 12)
+        attempts = _env_int("POSTER_IMAGE_TASK_POLL_ATTEMPTS", 24)
+        interval = _env_int("POSTER_IMAGE_TASK_POLL_INTERVAL_SECONDS", 5)
+        logger.info(
+            "AIHubMix 任务已提交：task_id=%s initial_delay=%ss poll_attempts=%d poll_interval=%ss",
+            task_id,
+            initial_delay,
+            attempts,
+            interval,
+        )
+        time.sleep(initial_delay)
+        for attempt in range(1, attempts + 1):
+            try:
+                query = self.session.get(f"{self.task_base_url}/tasks/{task_id}", headers=headers, timeout=request_timeout)
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RetryError) as exc:
+                raise _network_error(self.name, model_id, exc, started) from exc
+            except requests.exceptions.RequestException as exc:
+                raise _network_error(self.name, model_id, exc, started) from exc
+            if query.status_code >= 400:
+                raise _http_error(self.name, model_id, query, started)
+            task_request_id = _response_request_id(query) or request_id
+            try:
+                task_payload = query.json()
+            except ValueError as exc:
+                raise ImageProviderError(
+                    f"{self.name} 任务轮询返回非 JSON 响应：{exc}",
+                    provider=self.name,
+                    model=model_id,
+                    request_id=task_request_id,
+                    latency_ms=_elapsed_ms(started),
+                    error_code="invalid_task_json",
+                    fallback_allowed=False,
+                ) from exc
+            if task_payload.get("code", 200) != 200:
+                logger.info(
+                    "AIHubMix 任务轮询：task_id=%s poll=%d/%d code=%s，继续等待",
+                    task_id,
+                    attempt,
+                    attempts,
+                    task_payload.get("code"),
+                )
+                time.sleep(interval)
+                continue
+            data = task_payload.get("data") if isinstance(task_payload.get("data"), dict) else {}
+            status = str(data.get("status") or "").lower()
+            logger.info("AIHubMix 任务轮询：task_id=%s poll=%d/%d status=%s", task_id, attempt, attempts, status or "unknown")
+            if status == "completed":
+                image_url = _extract_completed_url(task_payload)
+                if not image_url:
+                    raise ImageProviderError(
+                        f"{self.name} 任务完成，但响应中没有图片 URL。",
+                        provider=self.name,
+                        model=model_id,
+                        request_id=task_request_id,
+                        latency_ms=_elapsed_ms(started),
+                        error_code="missing_completed_url",
+                        fallback_allowed=False,
+                    )
+                try:
+                    _download(image_url, output_path)
+                except RuntimeError as exc:
+                    raise ImageProviderError(
+                        f"{self.name} 图片下载失败：{exc}",
+                        provider=self.name,
+                        model=model_id,
+                        request_id=task_request_id,
+                        latency_ms=_elapsed_ms(started),
+                        error_code="image_download_failed",
+                        fallback_allowed=True,
+                    ) from exc
+                return {
+                    "status": "success",
+                    "filepath": str(output_path),
+                    "url": image_url,
+                    "task_id": task_id,
+                    "provider": self.name,
+                    "model": model_id,
+                    "request_id": task_request_id,
+                    "latency_ms": _elapsed_ms(started),
+                    "error_code": "",
+                }
+            if status == "failed":
+                error = data.get("error") or task_payload
+                logger.error("AIHubMix 任务失败：task_id=%s error=%s", task_id, error)
+                raise ImageProviderError(
+                    json.dumps(error, ensure_ascii=False),
+                    provider=self.name,
+                    model=model_id,
+                    request_id=task_request_id,
+                    latency_ms=_elapsed_ms(started),
+                    error_code="task_failed",
+                    fallback_allowed=False,
+                )
+            time.sleep(interval)
+
+        raise ImageProviderError(
+            f"{self.name} 任务超时：{task_id}",
+            provider=self.name,
+            model=model_id,
+            request_id=request_id,
+            latency_ms=_elapsed_ms(started),
+            error_code="task_timeout",
+            fallback_allowed=True,
+        )
+
+    def _predictions_payload(self, prompt: str, image_urls: list[str], size: str, resolution: str) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "input": {
+                "prompt": prompt,
+                "size": self._request_size(size, resolution),
+                "n": 1,
+                "quality": self.quality,
+                "output_format": self.output_format,
+            }
+        }
+        if image_urls:
+            payload["input"]["image"] = image_urls[0]
+            payload["input"]["images"] = image_urls
+        return payload
+
+    def _images_payload(self, prompt: str, image_urls: list[str], size: str, resolution: str, model_id: str) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": model_id,
+            "prompt": prompt,
+            "n": 1,
+            "size": self._request_size(size, resolution),
+            "quality": self.quality,
+            "output_format": self.output_format,
+        }
+        if image_urls:
+            payload["image_urls"] = image_urls
+        return payload
+
+    def _generate_with_edits(
+        self,
+        *,
+        prompt: str,
+        reference_images: list[Path],
+        output_path: Path,
+        size: str,
+        resolution: str,
+        model_id: str,
+    ) -> dict[str, Any]:
+        if not reference_images:
+            raise ImageProviderError(
+                f"{self.name} images_edits 需要至少一张参考图。",
+                provider=self.name,
+                model=model_id,
+                error_code="missing_reference_image",
+                fallback_allowed=False,
+            )
+
+        request_size = self._request_size(size, resolution)
+        data = {
+            "model": model_id,
+            "prompt": prompt,
+            "n": "1",
+            "size": request_size,
+            "quality": self.quality,
+            "output_format": self.output_format,
+        }
+        stream_enabled = self.stream
+        if stream_enabled:
+            data["stream"] = "true"
+            data["partial_images"] = str(self.partial_images)
+        request_timeout = _env_int("POSTER_IMAGE_REQUEST_TIMEOUT_SECONDS", 120)
+        logger.info(
+            "提交 AIHubMix edits 生图请求：model=%s size=%s reference_images=%d stream=%s partial_images=%s timeout=%ss",
+            model_id,
+            request_size,
+            len(reference_images),
+            stream_enabled,
+            data.get("partial_images", ""),
+            request_timeout,
+        )
+
+        handles = []
+        files = []
+        try:
+            for path in reference_images:
+                handle = path.open("rb")
+                handles.append(handle)
+                content_type = mimetypes.guess_type(path.name)[0] or "image/png"
+                files.append(("image[]", (path.name, handle, content_type)))
+
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            started = time.perf_counter()
+            response: requests.Response | None = None
+            try:
+                response = self.session.post(
+                    f"{self.base_url}/images/edits",
+                    headers=headers,
+                    data=data,
+                    files=files,
+                    timeout=request_timeout,
+                    stream=stream_enabled,
+                )
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RetryError) as exc:
+                raise _network_error(self.name, model_id, exc, started) from exc
+            except requests.exceptions.RequestException as exc:
+                raise _network_error(self.name, model_id, exc, started) from exc
+        finally:
+            for handle in handles:
+                handle.close()
+
+        if response.status_code >= 400:
+            raise _http_error(self.name, model_id, response, started)
+
+        request_id = _response_request_id(response)
+        if stream_enabled and "text/event-stream" in response.headers.get("content-type", "").lower():
+            stream_result = self._handle_stream_response(
+                response=response,
+                output_path=output_path,
+                model_id=model_id,
+                request_id=request_id,
+                started=started,
+            )
+            stream_result["reference_image_count"] = len(reference_images)
+            stream_result["request"] = {
+                "endpoint": "images_edits",
+                "size": request_size,
+                "model": model_id,
+                "stream": True,
+                "partial_images": self.partial_images,
+            }
+            return stream_result
+
+        try:
+            response_payload = response.json()
+        except ValueError as exc:
+            raise ImageProviderError(
+                f"{self.name} 返回非 JSON 响应：{exc}",
+                provider=self.name,
+                model=model_id,
+                request_id=request_id,
+                latency_ms=_elapsed_ms(started),
+                error_code="invalid_json",
+                fallback_allowed=False,
+            ) from exc
+
+        if response_payload.get("code", 200) != 200:
+            code, message = _extract_error(response_payload)
+            raise ImageProviderError(
+                f"{self.name} 返回错误：{message or code or response_payload}",
+                provider=self.name,
+                model=model_id,
+                request_id=request_id,
+                latency_ms=_elapsed_ms(started),
+                error_code=code or "provider_error",
+                fallback_allowed=_is_transient_code(code),
+            )
+
+        sync_result = self._handle_sync_response(
+            payload=response_payload,
+            output_path=output_path,
+            model_id=model_id,
+            request_id=request_id,
+            started=started,
+        )
+        if sync_result is not None:
+            sync_result["reference_image_count"] = len(reference_images)
+            sync_result["request"] = {"endpoint": "images_edits", "size": request_size, "model": model_id}
+            return sync_result
+
+        task_id = _extract_task_id(response_payload)
+        if task_id:
+            result = self._poll_task(
+                task_id=task_id,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                output_path=output_path,
+                model_id=model_id,
+                request_id=request_id,
+                started=started,
+                request_timeout=request_timeout,
+            )
+            result["reference_image_count"] = len(reference_images)
+            result["request"] = {"endpoint": "images_edits", "size": request_size, "model": model_id}
+            return result
+
+        raise ImageProviderError(
+            f"{self.name} 未返回图片或 task_id。",
+            provider=self.name,
+            model=model_id,
+            request_id=request_id,
+            latency_ms=_elapsed_ms(started),
+            error_code="missing_image",
+            fallback_allowed=False,
+        )
+
+    def generate(
+        self,
+        *,
+        prompt: str,
+        reference_images: list[Path],
+        output_path: Path,
+        size: str,
+        resolution: str,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        model_id = model or self.model
+        if not self.api_key:
+            raise ImageProviderError(
+                "缺少 AIHubMix API Key：请配置 AIHUBMIX_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.aihubmix.api_key。",
+                provider=self.name,
+                model=model_id,
+                error_code="missing_api_key",
+                fallback_allowed=True,
+            )
+
+        image_urls = [image_to_data_url(path) for path in reference_images if path.is_file()]
+        endpoint = self.endpoint.strip().lower()
+        if endpoint == "images_edits" or (endpoint == "auto" and image_urls):
+            return self._generate_with_edits(
+                prompt=prompt,
+                reference_images=[path for path in reference_images if path.is_file()],
+                output_path=output_path,
+                size=size,
+                resolution=resolution,
+                model_id=model_id,
+            )
+        if endpoint == "predictions":
+            url = f"{self.base_url}/models/openai/{model_id}/predictions"
+            payload = self._predictions_payload(prompt, image_urls, size, resolution)
+        else:
+            url = f"{self.base_url}/images/generations"
+            payload = self._images_payload(prompt, image_urls, size, resolution, model_id)
+
+        request_timeout = _env_int("POSTER_IMAGE_REQUEST_TIMEOUT_SECONDS", 120)
+        logger.info(
+            "提交 AIHubMix 生图请求：endpoint=%s model=%s size=%s reference_images=%d timeout=%ss",
+            endpoint,
+            model_id,
+            payload.get("size") or payload.get("input", {}).get("size"),
+            len(image_urls),
+            request_timeout,
+        )
+
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        started = time.perf_counter()
+        response: requests.Response | None = None
+        try:
+            response = self.session.post(url, headers=headers, json=payload, timeout=request_timeout)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RetryError) as exc:
+            raise _network_error(self.name, model_id, exc, started) from exc
+        except requests.exceptions.RequestException as exc:
+            raise _network_error(self.name, model_id, exc, started) from exc
+
+        if response.status_code >= 400:
+            raise _http_error(self.name, model_id, response, started)
+
+        request_id = _response_request_id(response)
+        try:
+            response_payload = response.json()
+        except ValueError as exc:
+            raise ImageProviderError(
+                f"{self.name} 返回非 JSON 响应：{exc}",
+                provider=self.name,
+                model=model_id,
+                request_id=request_id,
+                latency_ms=_elapsed_ms(started),
+                error_code="invalid_json",
+                fallback_allowed=False,
+            ) from exc
+
+        if response_payload.get("code", 200) != 200:
+            code, message = _extract_error(response_payload)
+            raise ImageProviderError(
+                f"{self.name} 返回错误：{message or code or response_payload}",
+                provider=self.name,
+                model=model_id,
+                request_id=request_id,
+                latency_ms=_elapsed_ms(started),
+                error_code=code or "provider_error",
+                fallback_allowed=_is_transient_code(code),
+            )
+
+        sync_result = self._handle_sync_response(
+            payload=response_payload,
+            output_path=output_path,
+            model_id=model_id,
+            request_id=request_id,
+            started=started,
+        )
+        if sync_result is not None:
+            sync_result["reference_image_count"] = len(image_urls)
+            sync_result["request"] = {"endpoint": endpoint, "size": payload.get("size") or payload.get("input", {}).get("size"), "model": model_id}
+            return sync_result
+
+        task_id = _extract_task_id(response_payload)
+        if task_id:
+            result = self._poll_task(
+                task_id=task_id,
+                headers=headers,
+                output_path=output_path,
+                model_id=model_id,
+                request_id=request_id,
+                started=started,
+                request_timeout=request_timeout,
+            )
+            result["reference_image_count"] = len(image_urls)
+            result["request"] = {"endpoint": endpoint, "size": payload.get("size") or payload.get("input", {}).get("size"), "model": model_id}
+            return result
+
+        raise ImageProviderError(
+            f"{self.name} 未返回图片或 task_id。",
+            provider=self.name,
+            model=model_id,
+            request_id=request_id,
+            latency_ms=_elapsed_ms(started),
+            error_code="missing_image",
+            fallback_allowed=False,
+        )
+
+    def generate_text_image(
+        self,
+        *,
+        prompt: str,
+        output_path: Path,
+        size: str,
+        quality: str,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        model_id = model or self.model
+        if not self.api_key:
+            raise ImageProviderError(
+                "缺少 AIHubMix API Key：请配置 AIHUBMIX_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.aihubmix.api_key。",
+                provider=self.name,
+                model=model_id,
+                error_code="missing_api_key",
+                fallback_allowed=False,
+            )
+
+        payload: dict[str, Any] = {
+            "model": model_id,
+            "prompt": prompt,
+            "n": 1,
+            "size": size,
+            "quality": quality,
+            "output_format": self.output_format,
+        }
+        request_timeout = _env_int("POSTER_IMAGE_SMOKE_TIMEOUT_SECONDS", 300)
+        logger.info(
+            "提交 AIHubMix 最小生图检查：endpoint=images_generations model=%s size=%s quality=%s timeout=%ss",
+            model_id,
+            size,
+            quality,
+            request_timeout,
+        )
+
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        started = time.perf_counter()
+        try:
+            response = self.session.post(
+                f"{self.base_url}/images/generations",
+                headers=headers,
+                json=payload,
+                timeout=request_timeout,
+            )
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RetryError) as exc:
+            raise _network_error(self.name, model_id, exc, started) from exc
+        except requests.exceptions.RequestException as exc:
+            raise _network_error(self.name, model_id, exc, started) from exc
+
+        if response.status_code >= 400:
+            raise _http_error(self.name, model_id, response, started)
+
+        request_id = _response_request_id(response)
+        try:
+            response_payload = response.json()
+        except ValueError as exc:
+            raise ImageProviderError(
+                f"{self.name} 返回非 JSON 响应：{exc}",
+                provider=self.name,
+                model=model_id,
+                request_id=request_id,
+                latency_ms=_elapsed_ms(started),
+                error_code="invalid_json",
+                fallback_allowed=False,
+            ) from exc
+
+        if response_payload.get("code", 200) != 200:
+            code, message = _extract_error(response_payload)
+            raise ImageProviderError(
+                f"{self.name} 返回错误：{message or code or response_payload}",
+                provider=self.name,
+                model=model_id,
+                request_id=request_id,
+                latency_ms=_elapsed_ms(started),
+                error_code=code or "provider_error",
+                fallback_allowed=False,
+            )
+
+        sync_result = self._handle_sync_response(
+            payload=response_payload,
+            output_path=output_path,
+            model_id=model_id,
+            request_id=request_id,
+            started=started,
+        )
+        if sync_result is not None:
+            sync_result["reference_image_count"] = 0
+            sync_result["request"] = {
+                "endpoint": "images_generations",
+                "size": size,
+                "quality": quality,
+                "model": model_id,
+                "smoke": True,
+            }
+            return sync_result
+
+        task_id = _extract_task_id(response_payload)
+        if task_id:
+            result = self._poll_task(
+                task_id=task_id,
+                headers=headers,
+                output_path=output_path,
+                model_id=model_id,
+                request_id=request_id,
+                started=started,
+                request_timeout=request_timeout,
+            )
+            result["reference_image_count"] = 0
+            result["request"] = {
+                "endpoint": "images_generations",
+                "size": size,
+                "quality": quality,
+                "model": model_id,
+                "smoke": True,
+            }
+            return result
+
+        raise ImageProviderError(
+            f"{self.name} 未返回图片或 task_id。",
+            provider=self.name,
+            model=model_id,
+            request_id=request_id,
+            latency_ms=_elapsed_ms(started),
+            error_code="missing_image",
+            fallback_allowed=False,
+        )
+
+
 def _build_provider(name: str) -> ImageProvider:
+    if name == "aihubmix":
+        return AIHubMixProvider()
     if name == "volcengine_seedream":
         return VolcengineSeedreamProvider()
     if name == "apimart":
@@ -925,6 +1751,7 @@ def require_api_key() -> str:
         missing.append(provider_name)
     raise RuntimeError(
         "缺少图片生成 API Key："
+        "AIHubMix 请配置 AIHUBMIX_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.aihubmix.api_key；"
         "火山方舟请配置 ARK_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.volcengine_seedream.api_key；"
         "APIMart 请配置 APIMART_API_KEY/OPENAI_API_KEY 或 lx_haibao.image_api.apimart.api_key。"
     )
@@ -938,8 +1765,13 @@ def generate_image(
     size: str = "9:16",
     resolution: str = "2k",
     model: str | None = None,
+    skip_providers: list[str] | None = None,
 ) -> dict[str, Any]:
-    provider_names = _configured_provider_names()
+    skipped = {name.strip().lower() for name in (skip_providers or []) if name.strip()}
+    provider_names = [name for name in _configured_provider_names() if name not in skipped]
+    if not provider_names:
+        skipped_text = ", ".join(sorted(skipped)) or "-"
+        raise RuntimeError(f"图片生成失败：没有可用 provider；已跳过 provider={skipped_text}")
     errors: list[ImageProviderError] = []
     fallback_used = False
 
@@ -993,6 +1825,57 @@ def generate_image(
     raise RuntimeError(_format_provider_errors(errors))
 
 
+def smoke_test_provider(
+    *,
+    provider_name: str,
+    output_path: Path,
+    prompt: str,
+    size: str = "1024x1024",
+    quality: str = "low",
+    model: str | None = None,
+) -> dict[str, Any]:
+    provider = _build_provider(provider_name.strip().lower())
+    try:
+        if isinstance(provider, AIHubMixProvider):
+            result = provider.generate_text_image(
+                prompt=prompt,
+                output_path=output_path,
+                size=size,
+                quality=quality,
+                model=model,
+            )
+        else:
+            result = provider.generate(
+                prompt=prompt,
+                reference_images=[],
+                output_path=output_path,
+                size=size,
+                resolution="",
+                model=model,
+            )
+        _log_provider_event(
+            provider=str(result.get("provider") or provider.name),
+            model=str(result.get("model") or provider.model),
+            request_id=str(result.get("request_id") or ""),
+            latency_ms=int(result["latency_ms"]) if result.get("latency_ms") is not None else None,
+            error_code=str(result.get("error_code") or ""),
+            fallback_used=False,
+            level=logging.INFO,
+        )
+        return result
+    except ImageProviderError as exc:
+        _log_provider_event(
+            provider=exc.provider,
+            model=exc.model,
+            request_id=exc.request_id,
+            latency_ms=exc.latency_ms,
+            error_code=exc.error_code,
+            fallback_used=False,
+            level=logging.WARNING,
+        )
+        raise RuntimeError(_format_provider_errors([exc])) from exc
+
+
 def generateImage(prompt: str, options: dict[str, Any]) -> dict[str, Any]:
     return generate_image(
         prompt=prompt,
@@ -1001,13 +1884,14 @@ def generateImage(prompt: str, options: dict[str, Any]) -> dict[str, Any]:
         size=str(options.get("size", "9:16")),
         resolution=str(options.get("resolution", "2k")),
         model=options.get("model"),
+        skip_providers=[str(item) for item in options.get("skip_providers", [])],
     )
 
 
 def check_providers() -> dict[str, Any]:
     provider_order = _configured_provider_names()
     providers: list[dict[str, Any]] = []
-    for provider_name in ("volcengine_seedream", "apimart"):
+    for provider_name in ("aihubmix", "apimart", "volcengine_seedream"):
         try:
             provider = _build_provider(provider_name)
             item = provider.health_check()

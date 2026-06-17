@@ -4,7 +4,7 @@
 
 ### hhdata.fact_daily_metrics（每日指标汇总表）
 
-来源：精简汇总数据，由 lx-hhdataimport 技能导入。
+来源：精简汇总数据，由上游内部入库流程写入。
 
 | 字段 | 类型 | 中文名 | 类别 |
 |------|------|--------|------|
@@ -159,5 +159,5 @@
 | 数据加载 | `lx-dapanribao/scripts/data_loader.py` |
 | 异动检测 | `lx-dapanribao/scripts/anomaly_detector.py` |
 | 飞书普通表格发布计划 | `lx-dapanribao/scripts/feishu_publisher.py` |
-| hhdata 导入 | `lx-hhdataimport/scripts/` |
+| hhdata 导入 | 上游内部入库流程 |
 | lxdata 计算 | `lx-zhibiaojisuan/scripts/lxdata_loader.py` |

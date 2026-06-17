@@ -64,7 +64,15 @@ def check_config(config: dict[str, Any], project_root: Path) -> list[CheckItem]:
         publish_backend = str(dailyreport.get("publish_backend") or "")
         if publish_backend == "lx-feishudocs":
             _check_lx_feishudocs(items, config, required=True)
-            _required(items, "lx_dapanribao.feishu_root_folder_token", dailyreport.get("feishu_root_folder_token"))
+            root_folder, source = _dailyreport_root_folder(config, dailyreport)
+            if root_folder:
+                items.append(CheckItem("lx_dapanribao.feishu_root_folder", "ok", f"已配置或继承: {source}"))
+            else:
+                items.append(CheckItem(
+                    "lx_dapanribao.feishu_root_folder",
+                    "warning",
+                    "未配置；可填写 lx_dapanribao.feishu_root_folder_url/token，或复用 lx_nongfu.operator_doc.contact_person_root_folders",
+                ))
     else:
         items.append(CheckItem("lx_dapanribao", "skipped", "未启用"))
 
@@ -132,6 +140,48 @@ def _workbuddy_lark_cli_path() -> Path:
         / "bin"
         / "lark-cli"
     )
+
+
+def _root_folder_from_contact_config(operator_doc: dict[str, Any], contact_person: str) -> str:
+    mapping = operator_doc.get("contact_person_root_folders")
+    if isinstance(mapping, dict) and contact_person:
+        value = mapping.get(contact_person)
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            return str(value.get("url") or value.get("token") or "").strip()
+    return ""
+
+
+def _dailyreport_root_folder(config: dict[str, Any], dailyreport: dict[str, Any]) -> tuple[str, str]:
+    explicit = str(
+        dailyreport.get("feishu_root_folder_url")
+        or dailyreport.get("feishu_root_folder_token")
+        or ""
+    ).strip()
+    if explicit:
+        return explicit, "lx_dapanribao"
+
+    nongfu = config.get("lx_nongfu", {})
+    if not isinstance(nongfu, dict):
+        return "", ""
+    operator_doc = nongfu.get("operator_doc", {})
+    if not isinstance(operator_doc, dict):
+        return "", ""
+
+    contact_person = str(dailyreport.get("default_person") or "").strip()
+    inherited = _root_folder_from_contact_config(operator_doc, contact_person)
+    if inherited:
+        return inherited, "lx_nongfu.operator_doc.contact_person_root_folders"
+
+    fallback = str(
+        operator_doc.get("operator_root_folder_url")
+        or operator_doc.get("operator_root_folder_token")
+        or ""
+    ).strip()
+    if fallback:
+        return fallback, "lx_nongfu.operator_doc.operator_root_folder"
+    return "", ""
 
 
 def _check_lx_feishudocs(items: list[CheckItem], config: dict[str, Any], required: bool) -> None:

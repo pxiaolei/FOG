@@ -607,6 +607,15 @@ def print_provider_check(result: dict[str, Any]) -> None:
         )
 
 
+def print_smoke_result(result: dict[str, Any]) -> None:
+    print("OK: lx-haibao image provider smoke test")
+    print(f"provider={result.get('provider') or ''}")
+    print(f"model={result.get('model') or ''}")
+    print(f"request_id={result.get('request_id') or ''}")
+    print(f"latency_ms={result.get('latency_ms') or ''}")
+    print(f"output_path={result.get('filepath') or ''}")
+
+
 def save_metadata(meta_dir: Path, payload: dict[str, Any]) -> Path:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     stem = safe_filename(str(payload.get("txt_file") or "poster"))
@@ -649,6 +658,7 @@ def generate_one(
 
     qr_retry_note: str | None = None
     last_failure = ""
+    qr_failed_providers: list[str] = []
     for attempt in range(max_retries + 1):
         logger.info(
             "开始生成海报：品牌=%s 城市=%s 城市来源=%s TXT=%s 尝试=%d/%d",
@@ -676,6 +686,7 @@ def generate_one(
                 output_path=tmp_path,
                 size=size,
                 resolution=resolution,
+                skip_providers=qr_failed_providers,
             )
             if skip_qr:
                 qr_result = {"ok": True, "brand": brand["canonical_name"], "skipped": True, "message": "QR validation skipped (--skip-qr)."}
@@ -715,8 +726,18 @@ def generate_one(
                     "metadata_path": str(meta_path),
                 }
             last_failure = str(qr_result.get("message") or qr_result.get("error") or "二维码验证失败")
+            provider_name = str(api_result.get("provider") or "")
+            if provider_name and provider_name not in qr_failed_providers:
+                qr_failed_providers.append(provider_name)
             qr_retry_note = last_failure + "。请确保第三张参考图中的二维码被完整、清晰、无变形地放入海报。"
-            logger.warning("品牌 %s 城市 %s 第 %d 次尝试 QR 验证失败：%s", brand["canonical_name"], city, attempt + 1, last_failure)
+            logger.warning(
+                "品牌 %s 城市 %s 第 %d 次尝试 QR 验证失败：provider=%s error=%s",
+                brand["canonical_name"],
+                city,
+                attempt + 1,
+                provider_name or "-",
+                last_failure,
+            )
             if tmp_path.exists():
                 tmp_path.unlink()
         except Exception as exc:  # noqa: BLE001 - summarize per-file failures without stopping other brands.
@@ -752,6 +773,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="WorkBuddy poster batch generator using configured image providers.")
     parser.add_argument("--check", action="store_true", help="Validate dependencies, brand assets, templates, and source QR codes without generating images.")
     parser.add_argument("--check-providers", action="store_true", help="Check image provider config and base_url connectivity without generating images.")
+    parser.add_argument("--smoke-provider", help="Run one real minimal image generation call for a provider. Requires --confirmed and may incur API cost.")
+    parser.add_argument("--smoke-output-dir", help="Directory for --smoke-provider output image.")
+    parser.add_argument("--smoke-prompt", default="A simple clean square test image with a single blue circle on a white background.", help="Prompt for --smoke-provider.")
+    parser.add_argument("--smoke-size", default=os.environ.get("POSTER_IMAGE_SMOKE_SIZE", "1024x1024"), help="Image size for --smoke-provider.")
+    parser.add_argument("--smoke-quality", default=os.environ.get("POSTER_IMAGE_SMOKE_QUALITY", "low"), help="Image quality for --smoke-provider.")
     parser.add_argument("--dir", help="Directory containing activity TXT files.")
     parser.add_argument("--file", action="append", help="Single activity TXT path. Can be repeated.")
     parser.add_argument("--dry-run", action="store_true", help="Route files and preview confirmation table without calling image API.")
@@ -785,6 +811,35 @@ def main() -> int:
         else:
             print_provider_check(result)
         return 0 if result["ok"] else 1
+
+    if args.smoke_provider:
+        if not args.confirmed:
+            logger.error("--smoke-provider 会真实调用图片 API，可能产生费用；请追加 --confirmed。")
+            return 2
+        from image2_client import smoke_test_provider
+
+        smoke_dir = Path(args.smoke_output_dir).expanduser().resolve() if args.smoke_output_dir else skill_root() / "output" / "provider-smoke"
+        smoke_dir.mkdir(parents=True, exist_ok=True)
+        provider_name = str(args.smoke_provider).strip().lower()
+        output_path = smoke_dir / f"{safe_filename(provider_name)}-{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        try:
+            result = smoke_test_provider(
+                provider_name=provider_name,
+                output_path=output_path,
+                prompt=str(args.smoke_prompt),
+                size=str(args.smoke_size),
+                quality=str(args.smoke_quality),
+            )
+        except Exception as exc:  # noqa: BLE001 - report exact provider failure.
+            logger.error("图片 provider 最小生图检查失败：%s", exc)
+            if args.json:
+                print(json.dumps({"ok": False, "provider": provider_name, "error": str(exc)}, ensure_ascii=False, indent=2))
+            return 1
+        if args.json:
+            print(json.dumps({"ok": True, "result": result}, ensure_ascii=False, indent=2))
+        else:
+            print_smoke_result(result)
+        return 0
 
     paths = collect_input_paths(args)
     if not paths:

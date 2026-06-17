@@ -15,6 +15,7 @@ config/码表/
 .workbuddy/skills/lx-lxdataimport/
 .workbuddy/skills/lx-txdocs/
 .workbuddy/skills/lx-txwendang/
+.workbuddy/skills/lx-fogshare/
 
 # WorkBuddy 本地记忆和运行态
 .workbuddy/memory/
@@ -74,8 +75,12 @@ workspace/1*/
 !workspace/02数据导入/.gitkeep
 !workspace/02数据导入/待处理/
 !workspace/02数据导入/待处理/.gitkeep
+!workspace/02数据导入/待处理/hhdata/
+!workspace/02数据导入/待处理/hhdata/.gitkeep
 !workspace/02数据导入/已处理/
 !workspace/02数据导入/已处理/.gitkeep
+!workspace/02数据导入/已处理/hhdata/
+!workspace/02数据导入/已处理/hhdata/.gitkeep
 !workspace/02数据导入/处理日志/
 !workspace/02数据导入/处理日志/.gitkeep
 !workspace/03数据报表/
@@ -140,3 +145,5 @@ workspace/1*/
 !workspace/12农服协作/输出/.gitkeep
 !workspace/12农服协作/处理日志/
 !workspace/12农服协作/处理日志/.gitkeep
+!workspace/13月度返点计算/
+!workspace/13月度返点计算/.gitkeep

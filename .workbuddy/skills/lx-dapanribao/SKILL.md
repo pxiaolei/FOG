@@ -34,7 +34,8 @@ location: project
 ## 飞书普通表格发布机制
 
 - 发布依赖 WorkBuddy Skill：`lx-feishudocs`
-- 飞书根文件夹通过 `config/fog_config.yaml` 的 `lx_dapanribao.feishu_root_folder_token` 配置；为空时默认写到当前账号云空间根目录
+- 飞书根文件夹优先读取 `config/fog_config.yaml` 的 `lx_dapanribao.feishu_root_folder_url/token`
+- 日报根文件夹为空时，自动继承 `lx_nongfu.operator_doc.contact_person_root_folders.{对接人}`，与农夫协作复用同一批运营主体文件夹
 - 根文件夹下按运营主体查找子文件夹：默认 `{运营主体}-运营主体`
 - 每个运营主体一个独立表格：默认 `{运营主体}-大盘数据日报`
 - 每天新增或替换一个 Sheet（日期标签如 "0601"）
@@ -95,8 +96,10 @@ python3 main.py --output-dir workspace/03数据报表/日报
 
 **约束**：
 - 根文件夹 URL / token 写入配置，不能硬编码散落在脚本或提示词中
+- 根文件夹可留空复用 `lx_nongfu`；如果日报和农夫协作分属不同根目录，再单独填写 `lx_dapanribao.feishu_root_folder_url/token`
 - 运营主体文件夹默认按 `{operator}-运营主体` 命名；如飞书目录命名变化，修改 `operator_folder_name_template`
 - 目标表格默认按 `{operator}-大盘数据日报` 命名；如表格命名变化，修改 `report_title_template`
+- 个别主体目录或表名不一致时，使用 `operator_folder_overrides` / `report_title_overrides` 做单主体覆盖
 - `dailyreport_cache.json` 仅可缓存飞书 `spreadsheet_token` / `sheet_id`，不进入模板分发
 - 执行实际写入前，应先读取发布计划并用 `lx-feishudocs` 查询确认目标文件夹和表格
 
@@ -105,7 +108,7 @@ python3 main.py --output-dir workspace/03数据报表/日报
 1. 运行 `main.py --dry-run` 预览日报数据和发布计划。
 2. 确认无误后运行 `main.py` 生成完整发布计划 JSON。
 3. 使用 `lx-feishudocs`：
-   - 在飞书根文件夹下查找 `{运营主体}` 文件夹；
+   - 在飞书根文件夹下查找 `{运营主体}-运营主体` 文件夹；
    - 在运营主体文件夹中查找或创建 `{运营主体}-大盘数据日报` 普通表格；
    - 创建或替换日期 Sheet；
    - 写入发布计划中的 `data_rows`。

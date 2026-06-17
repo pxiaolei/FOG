@@ -3,8 +3,20 @@
 # config.yaml 是个人真实配置，不要发到群里，也不要打进分享包。
 
 image_api:
-  provider_primary: "volcengine_seedream"
+  providers: ["aihubmix", "apimart", "volcengine_seedream"]
+  provider_primary: "aihubmix"
   provider_fallback: "apimart"
+
+  aihubmix:
+    api_key: ""
+    base_url: "https://aihubmix.com/v1"
+    task_base_url: "https://api.aihubmix.com/v1"
+    model: "gpt-image-2"
+    endpoint: "images_edits"
+    quality: "low"
+    output_format: "png"
+    stream: false
+    partial_images: 2
 
   volcengine_seedream:
     api_key: ""

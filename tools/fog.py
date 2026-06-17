@@ -82,16 +82,38 @@ def resolve_path(value: str | None, default: str = "") -> Path:
 
 def workspace_dirs(config: dict[str, Any]) -> list[Path]:
     dirs = [
+        resolve_path("workspace"),
+        resolve_path("workspace/00todo"),
+        resolve_path("workspace/00todo/存档"),
         resolve_path("workspace/01主体拆表"),
         resolve_path("workspace/01主体拆表/输入"),
         resolve_path("workspace/01主体拆表/输出"),
         resolve_path("workspace/01主体拆表/原表存档"),
         resolve_path("workspace/01主体拆表/处理日志"),
+        resolve_path("workspace/02数据导入"),
+        resolve_path("workspace/02数据导入/待处理"),
+        resolve_path("workspace/02数据导入/已处理"),
+        resolve_path("workspace/02数据导入/处理日志"),
+        resolve_path("workspace/03数据报表"),
         resolve_path("workspace/03数据报表/日报"),
         resolve_path("workspace/03数据报表/周报"),
         resolve_path("workspace/03数据报表/月报"),
         resolve_path("workspace/03数据报表/其他"),
         resolve_path("workspace/04数据分析"),
+        resolve_path("workspace/05策略活动"),
+        resolve_path("workspace/05策略活动/策略活动表"),
+        resolve_path("workspace/05策略活动/竞品策略"),
+        resolve_path("workspace/05策略活动/导入后台表格"),
+        resolve_path("workspace/06后台操作"),
+        resolve_path("workspace/07共补活动"),
+        resolve_path("workspace/07共补活动/共补待处理"),
+        resolve_path("workspace/07共补活动/共补已处理"),
+        resolve_path("workspace/07共补活动/共补处理日志"),
+        resolve_path("workspace/08端内宣传图"),
+        resolve_path("workspace/08端内宣传图/产出图"),
+        resolve_path("workspace/08端内宣传图/参考图"),
+        resolve_path("workspace/09端外海报图"),
+        resolve_path("workspace/09端外海报图/活动TXT"),
         resolve_path("workspace/10表格同步"),
         resolve_path("workspace/10表格同步/待处理"),
         resolve_path("workspace/10表格同步/输出"),
@@ -100,6 +122,7 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
         resolve_path("workspace/12农夫协作/待处理"),
         resolve_path("workspace/12农夫协作/输出"),
         resolve_path("workspace/12农夫协作/处理日志"),
+        resolve_path("workspace/13月度返点计算"),
     ]
 
     zhutichaibiao = config.get("lx_zhutichaibiao", {})
@@ -122,6 +145,11 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
         base = resolve_path(nongfu.get("workspace_dir"), "workspace/12农夫协作")
         dirs.extend([base, base / "待处理", base / "输出", base / "处理日志"])
 
+    yuedufandian = config.get("lx_yuedufandian", {})
+    if isinstance(yuedufandian, dict):
+        base = resolve_path(yuedufandian.get("work_root"), "workspace/13月度返点计算")
+        dirs.append(base)
+
     unique: list[Path] = []
     seen: set[Path] = set()
     for path in dirs:
@@ -133,12 +161,17 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    if args.dry_run:
+        config = load_yaml(CONFIG_PATH) or load_yaml(EXAMPLE_PATH)
+        for path in workspace_dirs(config):
+            print(f"[dry-run] create {path}")
+        if not CONFIG_PATH.exists():
+            print(f"[dry-run] would create config/fog_config.yaml from {EXAMPLE_PATH}")
+        return 0
+
     created = ensure_config()
     config = load_yaml(CONFIG_PATH)
     for path in workspace_dirs(config):
-        if args.dry_run:
-            print(f"[dry-run] create {path}")
-            continue
         path.mkdir(parents=True, exist_ok=True)
         (path / ".gitkeep").touch(exist_ok=True)
         print(f"[ok] {path}")
@@ -249,14 +282,24 @@ def cmd_check(_: argparse.Namespace) -> int:
 
     if enabled.get("lx_haibao"):
         image_api = ((config.get("lx_haibao", {}) or {}).get("image_api", {}) or {})
-        primary = str(image_api.get("provider_primary") or "volcengine_seedream")
-        providers = [primary, str(image_api.get("provider_fallback") or "")]
+        configured_providers = image_api.get("providers")
+        providers = [str(item) for item in configured_providers] if isinstance(configured_providers, list) else []
+        providers.extend([
+            str(image_api.get("provider_primary") or "aihubmix"),
+            str(image_api.get("provider_fallback") or ""),
+        ])
+        providers = [provider for index, provider in enumerate(providers) if provider and provider not in providers[:index]]
         configured = False
         for provider in providers:
             provider_config = image_api.get(provider, {}) if provider else {}
             if isinstance(provider_config, dict) and provider_config.get("api_key"):
                 configured = True
-        if os.environ.get("ARK_API_KEY") or os.environ.get("APIMART_API_KEY") or os.environ.get("OPENAI_API_KEY"):
+        if (
+            os.environ.get("AIHUBMIX_API_KEY")
+            or os.environ.get("ARK_API_KEY")
+            or os.environ.get("APIMART_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+        ):
             configured = True
         if configured:
             add_check(items, "ok", "lx_haibao.image_api", "至少一个 provider 已配置 API Key")
@@ -281,6 +324,53 @@ def cmd_check(_: argparse.Namespace) -> int:
             add_check(items, "error", "lx_nongfu.sync.require_brand_city_match", "必须开启品牌+城市匹配")
         else:
             add_check(items, "ok", "lx_nongfu.sync.require_brand_city_match", "已开启")
+
+    if enabled.get("lx_celuehuodong"):
+        personal_config = load_yaml(PROJECT_ROOT / "config" / "personal_config.yaml")
+        celue = merge_missing(
+            personal_config.get("lx_celuehuodong", {}) if isinstance(personal_config.get("lx_celuehuodong", {}), dict) else {},
+            config.get("lx_celuehuodong", {}) if isinstance(config.get("lx_celuehuodong", {}), dict) else {},
+        )
+        required(items, "lx_celuehuodong.strategy_workbook", celue.get("strategy_workbook"), "error")
+        workbook = resolve_path(celue.get("strategy_workbook"), "workspace/05策略活动/策略活动表/城市策略活动表2604版_v2.xlsm")
+        if workbook.exists():
+            add_check(items, "ok", "lx_celuehuodong.strategy_workbook.exists", f"已找到: {workbook}")
+        else:
+            add_check(items, "warning", "lx_celuehuodong.strategy_workbook.exists", f"未找到: {workbook}")
+        output_dir = resolve_path(celue.get("import_output_dir"), "workspace/05策略活动/导入后台表格")
+        if output_dir.exists():
+            add_check(items, "ok", "lx_celuehuodong.import_output_dir", f"已找到: {output_dir}")
+        else:
+            add_check(items, "warning", "lx_celuehuodong.import_output_dir", f"未找到: {output_dir}")
+        archive_dir = resolve_path(celue.get("gongbu_archive_dir"), "workspace/07共补活动/共补原表存档")
+        if archive_dir.exists():
+            add_check(items, "ok", "lx_celuehuodong.gongbu_archive_dir", f"已找到: {archive_dir}")
+        else:
+            add_check(items, "warning", "lx_celuehuodong.gongbu_archive_dir", f"未找到: {archive_dir}")
+        if celue.get("target_cities"):
+            add_check(items, "ok", "lx_celuehuodong.target_cities", f"{len(celue.get('target_cities') or [])} 个城市")
+        else:
+            add_check(items, "warning", "lx_celuehuodong.target_cities", "未配置目标城市；运行时需传 --city")
+        if celue.get("require_confirmed") is False:
+            add_check(items, "error", "lx_celuehuodong.require_confirmed", "必须开启确认后写入")
+        else:
+            add_check(items, "ok", "lx_celuehuodong.require_confirmed", "已开启")
+
+    if enabled.get("lx_yuedufandian"):
+        yuedufandian = config.get("lx_yuedufandian", {}) or {}
+        required(items, "lx_yuedufandian.work_root", yuedufandian.get("work_root"), "error")
+        if not yuedufandian.get("default_contacts"):
+            add_check(items, "warning", "lx_yuedufandian.default_contacts", "未配置默认对接人；运行时需传 --contacts")
+        excluded = yuedufandian.get("exclude_operators") or []
+        if "LX" in excluded:
+            add_check(items, "ok", "lx_yuedufandian.exclude_operators", "已默认排除 LX")
+        else:
+            add_check(items, "warning", "lx_yuedufandian.exclude_operators", "未默认排除 LX")
+        db_config = config.get("database", {}) or {}
+        if all(db_config.get(key) for key in ("host", "database", "user", "password")):
+            add_check(items, "ok", "database", "PostgreSQL 写库配置已填写")
+        else:
+            add_check(items, "warning", "database", "未完整配置 PostgreSQL；lx_yuedufandian --sync-db 会不可用")
 
     personal_config_path = PROJECT_ROOT / "config" / "personal_config.yaml"
     for path in [CONFIG_PATH, personal_config_path]:

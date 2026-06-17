@@ -1,0 +1,187 @@
+month: "{month}"
+contacts:
+  - "{contact}"
+exclude_operators:
+  - "LX"
+
+brand_aliases:
+  "拼哒出行":
+    - "拼哒约车"
+  "蔚蓝滴仕":
+    - "快来用车"
+  "蓉橙出行":
+    - "秦汉出行"
+  "逸乘出行":
+    - "逸乘特惠"
+  "旗妙出行极速版":
+    - "旗妙出行"
+  "安安用车":
+    - "安心出行"
+
+scope:
+  include_rows: []
+  reassign_rows: []
+
+source_files:
+  billing:
+    pattern: "*账单对账*部分字段*.xlsx"
+  process:
+    pattern: "*LX品牌过程考核数据*.xlsx"
+  target:
+    pattern: "*目标拆解*入库*.xlsx"
+  open_city:
+    pattern: "*开城奖励*.xlsx"
+
+billing_base:
+  date_column: "分区日期(天)"
+  brand_column: "品牌"
+  city_column: "城市名称"
+  gross_receivable_column: "求和项:乘客应收_金额"
+  spring_service_fee_column: "求和项:乘客应收_春节服务费"
+  tr_type_column: "tr类型"
+  channel_column: "流量渠道"
+  exclude_tr_types:
+    - "强制共补"
+  exclude_channels:
+    - "灵犀PBD"
+
+open_city_reward:
+  exclude_billing_base: true
+  period_column: "备注1"
+  period_inclusive: true
+  invalid_period_policy: "error"
+  brand_column: "品牌"
+  city_column: "城市"
+  settlement_type_column: "结算类型"
+  settlement_type_include:
+    - "支出"
+  settlement_unit_column: "结算单位"
+  settlement_item_column: "结算项目"
+  settlement_item_include:
+    - "开城奖励"
+  open_date_column: "开城时间"
+  incentive_period_column: "激励期间"
+  rate_column: "比例"
+  settlement_period_column: "结算周期"
+  rebate_basis_column: "返利基数"
+  reward_amount_column: "返利金额"
+  remark1_column: "备注1"
+  remark2_column: "备注2"
+
+scale_rebate:
+  group_by: "operator"
+  basis: "operator_daily_completed_orders"
+  tiers:
+    - min: 2000
+      max: 10000
+      rate: 0.003
+      name: "0.2万-1万"
+    - min: 10000
+      max: 30000
+      rate: 0.005
+      name: "1万-3万"
+    - min: 30000
+      max: 60000
+      rate: 0.007
+      name: "3万-6万"
+    - min: 60000
+      max: 100000
+      rate: 0.01
+      name: "6万-10万"
+    - min: 100000
+      max: null
+      rate: 0.012
+      name: "10万+"
+
+targets:
+  travel_sheet: "出行"
+  youxing_sheet: "优行"
+  split_marker: "分开考核"
+  aggregate_marker: "聚合考核"
+  missing_target_policy: "participate_with_defaults"
+  default_process_coefficient: 1.0
+  default_assessment_mode: "聚合考核"
+  completed_target_basis: "daily_average"
+  exclude_youxing_from_travel_operator_orders: true
+  process_min_orders_basis: "operator_daily_completed_orders"
+  monthly_min_orders_basis: "operator_daily_completed_orders"
+  min_orders_for_monthly_rebate: 1000
+  min_orders_for_process_rebate: 2000
+
+process:
+  redlines:
+    - key: "supply_strategy"
+      name: "供需策略参与率"
+      type: "sheet_ratio_all"
+      sheet: "协同指标"
+      brand_column: "运力品牌"
+      city_column: "城市名称"
+      value_column: "供需策略参与率"
+      threshold: 1.0
+      threshold_text: ">=100%"
+      missing_as_pass: true
+      force_pass: []
+    - key: "driver_activity"
+      name: "司机活动参与率"
+      type: "constant"
+      value: 1.0
+      threshold: 1.0
+      threshold_text: "本月固定100%"
+    - key: "merchant_card_strategy"
+      name: "商家独补卖卡策略参与率"
+      type: "sheet_ratio_all"
+      sheet: "协同指标"
+      brand_column: "运力品牌"
+      city_column: "城市名称"
+      value_column: "独补配置率"
+      threshold: 1.0
+      threshold_text: ">=100%"
+      missing_as_pass: true
+      force_pass: []
+  metrics:
+    - key: "tsh_growth"
+      name: "TSH增速"
+      type: "tsh_growth"
+      sheet: "TSH"
+      date_column: "日期(月)"
+      brand_column: "品牌名称"
+      city_column: "城市名称"
+      value_column: "在线时长(小时)"
+      threshold: 0.03
+      threshold_text: "对比上月日均>=3%"
+      rate: 0.002
+      apply_coefficient: true
+    - key: "xf_driver_online"
+      name: "先锋司机上线率"
+      type: "tiered_ratio_from_sums"
+      sheet: "先锋司机"
+    brand_column: "品牌名称"
+    city_column: "城市"
+    numerator_column: "当日有上线司机数"
+    denominator_column: "司机数"
+    zero_denominator_as_pass: true
+    threshold_text: ">=80%"
+      tiers:
+        - min: 0.8
+          max: 0.83
+          rate: 0.002
+          apply_coefficient: true
+          name: "[80%,83%)"
+        - min: 0.83
+          max: null
+          rate: 0.002
+          apply_coefficient: true
+          extra_rate: 0.002
+          extra_apply_coefficient: false
+          name: "[83%,100%]"
+    - key: "driver_service_answer_rate"
+      name: "司机客服接起率"
+      type: "ratio_from_sums_by_brand"
+      sheet: "司机客服接起率"
+      brand_column: "商家名称"
+      numerator_column: "接起量"
+      denominator_column: "进线量"
+      threshold: 0.8
+      threshold_text: ">=80%"
+      rate: 0.001
+      apply_coefficient: true

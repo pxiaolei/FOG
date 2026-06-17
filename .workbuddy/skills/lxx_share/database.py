@@ -69,18 +69,25 @@ class DatabaseConnector:
         user = self.db_config.get('user')
         password = self.db_config.get('password')
         dbname = self.db_config.get('database')  # config.yaml 用 database 作为 key
+        sslmode = self.db_config.get('sslmode')
+        connect_timeout = self.db_config.get('connect_timeout')
+        optional_args = {}
+        if sslmode:
+            optional_args["sslmode"] = sslmode
+        if connect_timeout:
+            optional_args["connect_timeout"] = connect_timeout
 
         conn = None
         try:
             if _PG_DRIVER == "psycopg2":
                 conn = psycopg2.connect(
                     host=host, port=port, database=dbname,
-                    user=user, password=password,
+                    user=user, password=password, **optional_args,
                 )
             else:
                 conn = psycopg.connect(
                     host=host, port=port, dbname=dbname,
-                    user=user, password=password,
+                    user=user, password=password, **optional_args,
                 )
             yield conn
         finally:

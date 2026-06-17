@@ -33,13 +33,17 @@ if str(_skills_dir) not in sys.path:
 from config import (
     FEISHU_ROOT_FOLDER_TOKEN,
     FEISHU_ROOT_FOLDER_URL,
+    FEISHU_ROOT_FOLDER_SOURCE,
     DEFAULT_REPORT_TITLE_SUFFIX,
     MISSING_DISPLAY_VALUE,
     METRICS,
+    OPERATOR_FOLDER_OVERRIDES,
     OPERATOR_FOLDER_NAME_TEMPLATE,
     PUBLISH_BACKEND,
+    REPORT_TITLE_OVERRIDES,
     REPORT_TITLE_TEMPLATE,
     SUB_COLUMNS,
+    resolve_feishu_root_folder,
 )
 
 DAILY_REPORT_TITLE_SUFFIX = DEFAULT_REPORT_TITLE_SUFFIX
@@ -47,12 +51,18 @@ DECIMAL_VOLUME_METRICS = {"tph", "unit_price", "avg_orders_per_driver", "online_
 
 
 def _build_spreadsheet_title(operator_name: str) -> str:
+    override = REPORT_TITLE_OVERRIDES.get(operator_name)
+    if override:
+        return str(override)
     if "{operator}" in REPORT_TITLE_TEMPLATE:
         return REPORT_TITLE_TEMPLATE.format(operator=operator_name)
     return f"{operator_name}-{DAILY_REPORT_TITLE_SUFFIX}"
 
 
 def _build_operator_folder_name(operator_name: str) -> str:
+    override = OPERATOR_FOLDER_OVERRIDES.get(operator_name)
+    if override:
+        return str(override)
     if "{operator}" in OPERATOR_FOLDER_NAME_TEMPLATE:
         return OPERATOR_FOLDER_NAME_TEMPLATE.format(operator=operator_name)
     return OPERATOR_FOLDER_NAME_TEMPLATE or operator_name
@@ -141,7 +151,14 @@ def publish_to_feishu(
     existing_file_id: Optional[str] = None,
     deep_analysis: str = "",
     dry_run: bool = False,
+    root_folder_url: str = "",
+    root_folder_token: str = "",
+    root_folder_source: str = "",
 ) -> dict:
+    effective_root_url = root_folder_url or FEISHU_ROOT_FOLDER_URL
+    effective_root_token = root_folder_token or FEISHU_ROOT_FOLDER_TOKEN
+    effective_root_source = root_folder_source or FEISHU_ROOT_FOLDER_SOURCE
+
     result = {
         "operator": operator_name,
         "file_id": existing_file_id or "",
@@ -168,10 +185,12 @@ def publish_to_feishu(
 
     result.update({
         "publish_backend": PUBLISH_BACKEND,
-        "root_folder_url": FEISHU_ROOT_FOLDER_URL,
-        "root_folder_id": FEISHU_ROOT_FOLDER_TOKEN,
-        "feishu_root_folder_url": FEISHU_ROOT_FOLDER_URL,
-        "feishu_root_folder_token": FEISHU_ROOT_FOLDER_TOKEN,
+        "root_folder_url": effective_root_url,
+        "root_folder_id": effective_root_token,
+        "root_folder_source": effective_root_source,
+        "feishu_root_folder_url": effective_root_url,
+        "feishu_root_folder_token": effective_root_token,
+        "feishu_root_folder_source": effective_root_source,
         "spreadsheet_type": "feishu_sheets",
         "operator_folder_name": _build_operator_folder_name(operator_name),
         "spreadsheet_title": _build_spreadsheet_title(operator_name),
@@ -200,10 +219,12 @@ def publish_all(
     deep_analyses: dict[str, str] = None,
     dry_run: bool = False,
     output_dir: str | Path | None = None,
+    contact_person: str = "",
 ) -> list[dict]:
     if deep_analyses is None:
         deep_analyses = {}
 
+    root_folder_url, root_folder_token, root_folder_source = resolve_feishu_root_folder(contact_person)
     results = []
 
     for operator_name, report_df in operator_reports.items():
@@ -215,16 +236,35 @@ def publish_all(
             existing_file_id=None,
             deep_analysis=deep_analyses.get(operator_name, ""),
             dry_run=dry_run,
+            root_folder_url=root_folder_url,
+            root_folder_token=root_folder_token,
+            root_folder_source=root_folder_source,
         )
         results.append(result)
 
     if output_dir:
-        write_publish_plan(results, date_label, output_dir)
+        write_publish_plan(
+            results,
+            date_label,
+            output_dir,
+            root_folder_url=root_folder_url,
+            root_folder_token=root_folder_token,
+            root_folder_source=root_folder_source,
+            contact_person=contact_person,
+        )
 
     return results
 
 
-def write_publish_plan(results: list[dict], date_label: str, output_dir: str | Path) -> Path:
+def write_publish_plan(
+    results: list[dict],
+    date_label: str,
+    output_dir: str | Path,
+    root_folder_url: str = "",
+    root_folder_token: str = "",
+    root_folder_source: str = "",
+    contact_person: str = "",
+) -> Path:
     """写入 lx-feishudocs 发布计划 JSON，供后续飞书写入步骤读取。"""
     base = Path(output_dir)
     base.mkdir(parents=True, exist_ok=True)
@@ -232,11 +272,15 @@ def write_publish_plan(results: list[dict], date_label: str, output_dir: str | P
     payload = {
         "schema_version": 1,
         "publish_backend": PUBLISH_BACKEND,
-        "feishu_root_folder_url": FEISHU_ROOT_FOLDER_URL,
-        "feishu_root_folder_token": FEISHU_ROOT_FOLDER_TOKEN,
+        "contact_person": contact_person,
+        "feishu_root_folder_url": root_folder_url or FEISHU_ROOT_FOLDER_URL,
+        "feishu_root_folder_token": root_folder_token or FEISHU_ROOT_FOLDER_TOKEN,
+        "feishu_root_folder_source": root_folder_source or FEISHU_ROOT_FOLDER_SOURCE,
         "target_rules": {
             "operator_folder_name_template": OPERATOR_FOLDER_NAME_TEMPLATE,
+            "operator_folder_overrides": OPERATOR_FOLDER_OVERRIDES,
             "report_title_template": REPORT_TITLE_TEMPLATE,
+            "report_title_overrides": REPORT_TITLE_OVERRIDES,
             "sheet_name": date_label,
         },
         "reports": results,

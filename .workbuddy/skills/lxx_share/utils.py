@@ -122,27 +122,18 @@ class Config:
                     config_path = p
                     break
 
-        if config_path.exists():
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    data = yaml.safe_load(f) or {}
-                if config_path.name == 'fog_config.yaml':
-                    database = data.get('database', {})
-                    if not _has_database_values(database):
-                        personal_path = config_path.parent / 'personal_config.yaml'
-                        if personal_path.exists():
-                            with open(personal_path, 'r', encoding='utf-8') as pf:
-                                personal_data = yaml.safe_load(pf) or {}
-                            personal_database = personal_data.get('database', {})
-                            if isinstance(personal_database, dict):
-                                database = personal_database
-                    return {'database': database if isinstance(database, dict) else {}}
-                return {'database': {}}
-            except Exception as e:
-                print(f"⚠️ 加载配置文件失败: {e}")
-                return {}
-        else:
-            print(f"⚠️ 配置文件不存在: {config_path}")
+        try:
+            database = _database_from_path(config_path)
+            if not _has_database_values(database):
+                project_config_path = Path(__file__).parent.parent.parent.parent / 'config' / 'fog_config.yaml'
+                if config_path != project_config_path:
+                    database = _database_from_path(project_config_path)
+            if not _has_database_values(database):
+                personal_path = config_path.parent / 'personal_config.yaml'
+                database = _database_from_path(personal_path)
+            return {'database': database if isinstance(database, dict) else {}}
+        except Exception as e:
+            print(f"⚠️ 加载配置文件失败: {e}")
             return {}
 
     @property
@@ -171,3 +162,18 @@ def _has_database_values(database: object) -> bool:
     if not isinstance(database, dict):
         return False
     return any(database.get(key) not in (None, "") for key in ("host", "database", "user", "password"))
+
+
+def _database_from_path(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    import yaml
+
+    with open(path, 'r', encoding='utf-8') as f:
+        data = yaml.safe_load(f) or {}
+    database = data.get('database', {})
+    if not _has_database_values(database):
+        aliyun_database = data.get('aliyun_database', {})
+        if _has_database_values(aliyun_database):
+            database = aliyun_database
+    return database if isinstance(database, dict) else {}

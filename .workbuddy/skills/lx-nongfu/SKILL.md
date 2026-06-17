@@ -126,6 +126,21 @@ python .workbuddy/skills/lx-nongfu/scripts/run_split_publish.py \
   --contact-person "雷维亮"
 ```
 
+如果大文档已经由 `lx-zhutichaibiao` 拆好，不需要再从大表链接拆分，直接发布已拆分目录或 zip：
+
+```bash
+python3 .workbuddy/skills/lx-nongfu/scripts/run_publish_split_outputs.py \
+  "workspace/01主体拆表/输出/20260612_1437_端午策略时段_0618-0621.zip" \
+  "workspace/01主体拆表/输出/20260612_1438_26年端午服务费明细.zip" \
+  --contact-person "雷维亮"
+```
+
+默认 dry-run，只读取已拆分文件、查找各 `{运营主体}-日常信息` 飞书普通表格、检查同名 sheet 冲突；真正写入飞书必须显式加：
+
+```bash
+  --confirmed
+```
+
 默认是 dry-run，只预览匹配结果、目标表和各运营主体通知内容；真正写入飞书必须显式加：
 
 ```bash

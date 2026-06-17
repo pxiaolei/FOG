@@ -74,7 +74,7 @@ def is_ignored(relative_path: str, patterns: list[str]) -> bool:
     return any(glob_match(path, pattern) or glob_match(name, pattern) for pattern in patterns)
 
 
-def prepare_output(source_root: Path, output: Path, clean: bool, dry_run: bool) -> Path:
+def prepare_output(source_root: Path, output: Path, clean: bool, update_existing: bool, dry_run: bool) -> Path:
     source = source_root.resolve()
     target = output.expanduser().resolve()
 
@@ -83,6 +83,9 @@ def prepare_output(source_root: Path, output: Path, clean: bool, dry_run: bool) 
     if source in target.parents:
         raise ValueError("output path must be outside the source workspace")
 
+    if clean and update_existing:
+        raise ValueError("--clean and --update-existing cannot be used together")
+
     if dry_run:
         return target
 
@@ -90,8 +93,8 @@ def prepare_output(source_root: Path, output: Path, clean: bool, dry_run: bool) 
         if not target.is_dir():
             raise ValueError(f"output path exists but is not a directory: {target}")
         has_content = any(target.iterdir())
-        if has_content and not clean:
-            raise ValueError(f"output directory is not empty, rerun with --clean: {target}")
+        if has_content and not clean and not update_existing:
+            raise ValueError(f"output directory is not empty, rerun with --clean or --update-existing: {target}")
         if has_content and clean:
             shutil.rmtree(target)
 
@@ -197,7 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", default=".", help="source FOG workspace, defaults to current directory")
     parser.add_argument("--output", required=True, help="target template directory; must be outside source")
     parser.add_argument("--manifest", default=MANIFEST_DEFAULT, help="template manifest path")
-    parser.add_argument("--clean", action="store_true", help="delete existing output directory before export")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--clean", action="store_true", help="delete existing output directory before export")
+    mode.add_argument("--update-existing", action="store_true", help="copy into an existing output directory without deleting it")
     parser.add_argument("--dry-run", action="store_true", help="print planned files without copying")
     return parser
 
@@ -213,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         manifest = parse_manifest(manifest_path)
-        target_root = prepare_output(source_root, Path(args.output), args.clean, args.dry_run)
+        target_root = prepare_output(source_root, Path(args.output), args.clean, args.update_existing, args.dry_run)
         return export_template(source_root, target_root, manifest, args.dry_run)
     except Exception as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)

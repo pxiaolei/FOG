@@ -172,6 +172,7 @@ def main():
             deep_analyses=deep_analyses,
             dry_run=False,
             output_dir=output_dir,
+            contact_person=person,
         )
         for r in results:
             if r.get("error"):
@@ -186,7 +187,13 @@ def main():
         print(f"\n{'='*60}")
         print(f"  [DRY RUN] 预览完成，未实际发布")
         print(f"{'='*60}")
-        publish_all(operator_reports, label, dry_run=True, output_dir=output_dir)
+        publish_all(
+            operator_reports,
+            label,
+            dry_run=True,
+            output_dir=output_dir,
+            contact_person=person,
+        )
 
     print(f"\n{'='*60}")
     print(f"  完成")

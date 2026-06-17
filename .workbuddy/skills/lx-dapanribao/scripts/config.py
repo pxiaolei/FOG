@@ -2,6 +2,7 @@
 日报配置：对接人、指标定义、阈值、字段列表、飞书普通表格发布
 """
 
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,9 +50,16 @@ def _load_fog_config() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _dailyreport_config() -> dict:
-    config = _load_fog_config().get("lx_dapanribao", {})
+_FOG_CONFIG = _load_fog_config()
+
+
+def _config_section(name: str) -> dict:
+    config = _FOG_CONFIG.get(name, {})
     return config if isinstance(config, dict) else {}
+
+
+def _dailyreport_config() -> dict:
+    return _config_section("lx_dapanribao")
 
 
 def _resolve_project_path(value: str, default: str) -> str:
@@ -70,6 +78,51 @@ def _dailyreport_value(key: str, default):
         return _DAILYREPORT_CONFIG[key]
     return default
 
+
+def _string_value(value) -> str:
+    return str(value or "").strip()
+
+
+def _extract_folder_token(url_or_token: str) -> str:
+    value = _string_value(url_or_token)
+    match = re.search(r"/drive/folder/([^/?#]+)", value)
+    return match.group(1) if match else value
+
+
+def _root_folder_from_nongfu(contact_person: str) -> str:
+    nongfu = _config_section("lx_nongfu")
+    operator_doc = nongfu.get("operator_doc", {})
+    if not isinstance(operator_doc, dict):
+        return ""
+
+    mapping = operator_doc.get("contact_person_root_folders")
+    if contact_person and isinstance(mapping, dict):
+        configured = mapping.get(contact_person)
+        if isinstance(configured, str):
+            return configured.strip()
+        if isinstance(configured, dict):
+            return _string_value(configured.get("url") or configured.get("token"))
+
+    return _string_value(
+        operator_doc.get("operator_root_folder_url")
+        or operator_doc.get("operator_root_folder_token")
+    )
+
+
+def resolve_feishu_root_folder(contact_person: str = "") -> tuple[str, str, str]:
+    """解析日报发布根目录，优先日报配置，其次继承 lx_nongfu 运营主体根目录。"""
+    explicit_url = _string_value(_dailyreport_value("feishu_root_folder_url", ""))
+    explicit_token = _string_value(_dailyreport_value("feishu_root_folder_token", ""))
+    if explicit_url or explicit_token:
+        return explicit_url, explicit_token or _extract_folder_token(explicit_url), "lx_dapanribao"
+
+    inherited = _root_folder_from_nongfu(contact_person or DEFAULT_PERSON)
+    if inherited:
+        inherited_url = inherited if inherited.startswith("http") else ""
+        return inherited_url, _extract_folder_token(inherited), "lx_nongfu.operator_doc"
+
+    return "", "", ""
+
 # ── 对接人配置（同事改为自己的对接人名字）──
 DEFAULT_PERSON = _dailyreport_value("default_person", "")
 
@@ -79,8 +132,9 @@ DEFAULT_REPORT_TITLE_SUFFIX = (
 )
 
 PUBLISH_BACKEND = _dailyreport_value("publish_backend", "lx-feishudocs") or "lx-feishudocs"
-FEISHU_ROOT_FOLDER_URL = _dailyreport_value("feishu_root_folder_url", "") or ""
-FEISHU_ROOT_FOLDER_TOKEN = _dailyreport_value("feishu_root_folder_token", "") or ""
+FEISHU_ROOT_FOLDER_URL, FEISHU_ROOT_FOLDER_TOKEN, FEISHU_ROOT_FOLDER_SOURCE = (
+    resolve_feishu_root_folder(DEFAULT_PERSON)
+)
 OPERATOR_FOLDER_NAME_TEMPLATE = (
     _dailyreport_value("operator_folder_name_template", "{operator}-运营主体") or "{operator}-运营主体"
 )
@@ -88,6 +142,12 @@ REPORT_TITLE_TEMPLATE = (
     _dailyreport_value("report_title_template", "")
     or "{operator}-大盘数据日报"
 )
+OPERATOR_FOLDER_OVERRIDES = _DAILYREPORT_CONFIG.get("operator_folder_overrides", {})
+if not isinstance(OPERATOR_FOLDER_OVERRIDES, dict):
+    OPERATOR_FOLDER_OVERRIDES = {}
+REPORT_TITLE_OVERRIDES = _DAILYREPORT_CONFIG.get("report_title_overrides", {})
+if not isinstance(REPORT_TITLE_OVERRIDES, dict):
+    REPORT_TITLE_OVERRIDES = {}
 
 # 日报表格的 spreadsheet token / sheet_id 可独立存储在 dailyreport_cache.json 中
 DAILYREPORT_CACHE_PATH = (
