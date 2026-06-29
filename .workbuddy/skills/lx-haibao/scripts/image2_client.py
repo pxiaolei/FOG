@@ -34,14 +34,21 @@ if str(_SKILLS_DIR) not in sys.path:
 from lxx_share.fog_config import get_section  # noqa: E402
 
 
-DEFAULT_PROVIDER_PRIMARY = "aihubmix"
-DEFAULT_PROVIDER_FALLBACK = "apimart"
+BUILTIN_IMAGE_GEN_PROVIDER = "builtin_image_gen"
+BUILTIN_IMAGE_GEN_ALIASES = {"builtin_image_gen", "codex_image_gen", "image_gen"}
+DEFAULT_PROVIDER_PRIMARY = "kie"
+DEFAULT_PROVIDER_FALLBACK = "aihubmix"
+DEFAULT_PROVIDERS = [DEFAULT_PROVIDER_PRIMARY, DEFAULT_PROVIDER_FALLBACK, "apimart"]
+DEFAULT_IMAGE_TASK_INITIAL_DELAY_SECONDS = 30
+DEFAULT_IMAGE_TASK_POLL_ATTEMPTS = 40
+DEFAULT_IMAGE_TASK_POLL_INTERVAL_SECONDS = 30
 
-DEFAULT_ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
-DEFAULT_ARK_MODEL = "doubao-seedream-5-0-260128"
-DEFAULT_ARK_SIZE = "1600x2848"
-DEFAULT_ARK_RESPONSE_FORMAT = "url"
-DEFAULT_ARK_OUTPUT_FORMAT = "png"
+DEFAULT_KIE_BASE_URL = "https://api.kie.ai"
+DEFAULT_KIE_UPLOAD_BASE_URL = "https://kieai.redpandaai.co"
+DEFAULT_KIE_TEXT_MODEL = "gpt-image-2-text-to-image"
+DEFAULT_KIE_IMAGE_MODEL = "gpt-image-2-image-to-image"
+DEFAULT_KIE_ASPECT_RATIO = "auto"
+DEFAULT_KIE_UPLOAD_PATH = "images/lx-haibao"
 
 DEFAULT_AIHUBMIX_BASE_URL = "https://aihubmix.com/v1"
 DEFAULT_AIHUBMIX_TASK_BASE_URL = "https://api.aihubmix.com/v1"
@@ -159,18 +166,27 @@ def _provider_bool(provider: str, key: str, env_names: list[str], default: bool)
     return default
 
 
+def _normalize_provider_name(name: str) -> str:
+    normalized = name.strip().lower().replace("-", "_")
+    if normalized in BUILTIN_IMAGE_GEN_ALIASES:
+        return BUILTIN_IMAGE_GEN_PROVIDER
+    return normalized
+
+
 def _configured_provider_names() -> list[str]:
     configured = _load_config()
     providers_value = configured.get("providers")
     raw_names: list[str] = []
     if isinstance(providers_value, list):
         raw_names.extend(str(item) for item in providers_value)
+    if not raw_names:
+        raw_names.extend(DEFAULT_PROVIDERS)
     primary = _top_config_value("provider_primary", "IMAGE_PROVIDER_PRIMARY", DEFAULT_PROVIDER_PRIMARY).strip()
     fallback = _top_config_value("provider_fallback", "IMAGE_PROVIDER_FALLBACK", DEFAULT_PROVIDER_FALLBACK).strip()
     raw_names.extend([primary, fallback])
     names: list[str] = []
     for name in raw_names:
-        normalized = name.lower()
+        normalized = _normalize_provider_name(name)
         if normalized and normalized != "none" and normalized not in names:
             names.append(normalized)
     return names or [DEFAULT_PROVIDER_PRIMARY]
@@ -199,7 +215,7 @@ def _elapsed_ms(started: float) -> int:
 def _response_request_id(response: requests.Response | None) -> str:
     if response is None:
         return ""
-    for header in ("x-request-id", "x-tt-logid", "x-volc-request-id", "x-ark-request-id", "request-id"):
+    for header in ("x-request-id", "x-tt-logid", "request-id"):
         value = response.headers.get(header)
         if value:
             return value
@@ -325,7 +341,7 @@ def _extract_task_id(payload: dict[str, Any]) -> str | None:
             task_id = item.get("task_id") or item.get("id")
             return str(task_id) if task_id else None
     if isinstance(data, dict):
-        task_id = data.get("task_id") or data.get("id")
+        task_id = data.get("task_id") or data.get("taskId") or data.get("id")
         return str(task_id) if task_id else None
     output = payload.get("output")
     if isinstance(output, list) and output:
@@ -375,6 +391,21 @@ def _extract_b64_json(payload: dict[str, Any]) -> str | None:
 
 def _extract_completed_url(payload: dict[str, Any]) -> str | None:
     data = payload.get("data")
+    if isinstance(data, dict):
+        result_json = data.get("resultJson")
+        if isinstance(result_json, str) and result_json.strip():
+            try:
+                result_payload = json.loads(result_json)
+            except ValueError:
+                result_payload = {}
+            if isinstance(result_payload, dict):
+                result_urls = result_payload.get("resultUrls")
+                if isinstance(result_urls, list) and result_urls:
+                    return str(result_urls[0])
+                for key in ("url", "imageUrl", "image_url"):
+                    value = result_payload.get(key)
+                    if value:
+                        return str(value)
     if isinstance(data, dict):
         result = data.get("result")
     else:
@@ -461,62 +492,246 @@ class ImageProvider:
         return result
 
 
-class VolcengineSeedreamProvider(ImageProvider):
-    name = "volcengine_seedream"
+class KIEProvider(ImageProvider):
+    name = "kie"
 
     @property
     def api_key(self) -> str:
-        return _provider_value(self.name, "api_key", ["ARK_API_KEY"])
+        return _provider_value(self.name, "api_key", ["KIE_API_KEY"])
 
     @property
     def base_url(self) -> str:
-        return _provider_value(self.name, "base_url", ["ARK_BASE_URL"], DEFAULT_ARK_BASE_URL).rstrip("/")
+        return _provider_value(self.name, "base_url", ["KIE_BASE_URL"], DEFAULT_KIE_BASE_URL).rstrip("/")
+
+    @property
+    def upload_base_url(self) -> str:
+        return _provider_value(
+            self.name,
+            "upload_base_url",
+            ["KIE_UPLOAD_BASE_URL"],
+            DEFAULT_KIE_UPLOAD_BASE_URL,
+        ).rstrip("/")
+
+    @property
+    def text_model(self) -> str:
+        return _provider_value(self.name, "text_model", ["KIE_TEXT_MODEL", "KIE_MODEL"], DEFAULT_KIE_TEXT_MODEL)
+
+    @property
+    def image_model(self) -> str:
+        return _provider_value(self.name, "image_model", ["KIE_IMAGE_MODEL", "KIE_MODEL"], DEFAULT_KIE_IMAGE_MODEL)
 
     @property
     def model(self) -> str:
-        return _provider_value(self.name, "model", ["ARK_IMAGE_MODEL"], DEFAULT_ARK_MODEL)
+        return self.image_model
 
     @property
-    def response_format(self) -> str:
-        return _provider_value(self.name, "response_format", ["ARK_RESPONSE_FORMAT"], DEFAULT_ARK_RESPONSE_FORMAT)
+    def aspect_ratio(self) -> str:
+        return _provider_value(self.name, "aspect_ratio", ["KIE_ASPECT_RATIO"], DEFAULT_KIE_ASPECT_RATIO)
 
     @property
-    def output_format(self) -> str:
-        return _provider_value(self.name, "output_format", ["ARK_OUTPUT_FORMAT"], DEFAULT_ARK_OUTPUT_FORMAT)
+    def upload_path(self) -> str:
+        return _provider_value(self.name, "upload_path", ["KIE_UPLOAD_PATH"], DEFAULT_KIE_UPLOAD_PATH)
 
     @property
-    def watermark(self) -> bool:
-        return _provider_bool(self.name, "watermark", ["ARK_WATERMARK"], False)
+    def callback_url(self) -> str:
+        return _provider_value(self.name, "callback_url", ["KIE_CALLBACK_URL"])
 
-    def _request_size(self, size: str, resolution: str) -> str:
-        configured = _provider_value(self.name, "size", ["ARK_IMAGE_SIZE"])
-        if configured:
-            return configured
+    def _request_aspect_ratio(self, size: str) -> str:
+        configured = self.aspect_ratio.strip()
         raw_size = (size or "").strip()
-        if raw_size.upper() in {"1K", "2K", "3K", "4K"}:
-            return raw_size.upper()
-        if "x" in raw_size.lower():
-            return raw_size.lower()
-        ratio_to_2k = {
-            "1:1": "2048x2048",
-            "4:3": "2304x1728",
-            "3:4": "1728x2304",
-            "16:9": "2848x1600",
-            "9:16": "1600x2848",
-            "3:2": "2496x1664",
-            "2:3": "1664x2496",
-            "21:9": "3136x1344",
-        }
-        if raw_size in ratio_to_2k:
-            return ratio_to_2k[raw_size]
-        if (resolution or "").upper() in {"1K", "2K", "3K", "4K"}:
-            return (resolution or "").upper()
-        return DEFAULT_ARK_SIZE
+        if configured and configured.lower() not in {"auto", "default"}:
+            return configured
+        if ":" in raw_size:
+            return raw_size
+        return configured or DEFAULT_KIE_ASPECT_RATIO
 
-    @staticmethod
-    def _supports_output_format(model: str) -> bool:
-        normalized = model.lower()
-        return "5-0" in normalized or "5.0" in normalized
+    def _upload_image(self, path: Path, *, index: int, started: float, model_id: str) -> str:
+        upload_timeout = _env_int("POSTER_KIE_UPLOAD_TIMEOUT_SECONDS", 120)
+        content_type = mimetypes.guess_type(path.name)[0] or "image/png"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        file_name = f"{int(time.time())}-{index}-{path.name}"
+        try:
+            with path.open("rb") as handle:
+                response = self.session.post(
+                    f"{self.upload_base_url}/api/file-stream-upload",
+                    headers=headers,
+                    data={"uploadPath": self.upload_path, "fileName": file_name},
+                    files={"file": (path.name, handle, content_type)},
+                    timeout=upload_timeout,
+                )
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RetryError) as exc:
+            raise _network_error(self.name, model_id, exc, started) from exc
+        except requests.exceptions.RequestException as exc:
+            raise _network_error(self.name, model_id, exc, started) from exc
+
+        if response.status_code >= 400:
+            raise _http_error(self.name, model_id, response, started)
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ImageProviderError(
+                f"{self.name} 文件上传返回非 JSON 响应：{exc}",
+                provider=self.name,
+                model=model_id,
+                request_id=_response_request_id(response),
+                latency_ms=_elapsed_ms(started),
+                error_code="invalid_upload_json",
+                fallback_allowed=False,
+            ) from exc
+        if payload.get("success") is False or payload.get("code", 200) != 200:
+            code, message = _extract_error(payload)
+            raise ImageProviderError(
+                f"{self.name} 文件上传失败：{message or code or payload}",
+                provider=self.name,
+                model=model_id,
+                request_id=_response_request_id(response),
+                latency_ms=_elapsed_ms(started),
+                error_code=code or "upload_failed",
+                fallback_allowed=_is_transient_code(code),
+            )
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        url = data.get("downloadUrl") or data.get("fileUrl") or data.get("url")
+        if not url:
+            raise ImageProviderError(
+                f"{self.name} 文件上传成功但未返回 downloadUrl/fileUrl。",
+                provider=self.name,
+                model=model_id,
+                request_id=_response_request_id(response),
+                latency_ms=_elapsed_ms(started),
+                error_code="missing_upload_url",
+                fallback_allowed=False,
+            )
+        return str(url)
+
+    def _upload_reference_images(self, paths: list[Path], *, started: float, model_id: str) -> list[str]:
+        urls: list[str] = []
+        for index, path in enumerate((item for item in paths if item.is_file()), start=1):
+            logger.info("上传 KIE 参考图：index=%d path=%s", index, path)
+            urls.append(self._upload_image(path, index=index, started=started, model_id=model_id))
+        return urls
+
+    def _poll_task(
+        self,
+        *,
+        task_id: str,
+        headers: dict[str, str],
+        output_path: Path,
+        model_id: str,
+        request_id: str,
+        started: float,
+        request_timeout: int,
+    ) -> dict[str, Any]:
+        initial_delay = _env_int("POSTER_IMAGE_TASK_INITIAL_DELAY_SECONDS", DEFAULT_IMAGE_TASK_INITIAL_DELAY_SECONDS)
+        attempts = _env_int("POSTER_IMAGE_TASK_POLL_ATTEMPTS", DEFAULT_IMAGE_TASK_POLL_ATTEMPTS)
+        interval = _env_int("POSTER_IMAGE_TASK_POLL_INTERVAL_SECONDS", DEFAULT_IMAGE_TASK_POLL_INTERVAL_SECONDS)
+        logger.info(
+            "KIE 任务已提交：task_id=%s initial_delay=%ss poll_attempts=%d poll_interval=%ss",
+            task_id,
+            initial_delay,
+            attempts,
+            interval,
+        )
+        time.sleep(initial_delay)
+        for attempt in range(1, attempts + 1):
+            try:
+                query = self.session.get(
+                    f"{self.base_url}/api/v1/jobs/recordInfo",
+                    headers=headers,
+                    params={"taskId": task_id},
+                    timeout=request_timeout,
+                )
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RetryError) as exc:
+                raise _network_error(self.name, model_id, exc, started) from exc
+            except requests.exceptions.RequestException as exc:
+                raise _network_error(self.name, model_id, exc, started) from exc
+            if query.status_code >= 400:
+                raise _http_error(self.name, model_id, query, started)
+            task_request_id = _response_request_id(query) or request_id
+            try:
+                task_payload = query.json()
+            except ValueError as exc:
+                raise ImageProviderError(
+                    f"{self.name} 任务轮询返回非 JSON 响应：{exc}",
+                    provider=self.name,
+                    model=model_id,
+                    request_id=task_request_id,
+                    latency_ms=_elapsed_ms(started),
+                    error_code="invalid_task_json",
+                    fallback_allowed=False,
+                ) from exc
+            if task_payload.get("code", 200) not in (200, "200") and task_payload.get("success") is not True:
+                code, message = _extract_error(task_payload)
+                raise ImageProviderError(
+                    f"{self.name} 任务查询失败：{message or code or task_payload}",
+                    provider=self.name,
+                    model=model_id,
+                    request_id=task_request_id,
+                    latency_ms=_elapsed_ms(started),
+                    error_code=code or "task_query_failed",
+                    fallback_allowed=_is_transient_code(code),
+                )
+
+            data = task_payload.get("data") if isinstance(task_payload.get("data"), dict) else {}
+            state = str(data.get("state") or data.get("status") or "").strip().lower()
+            logger.info("KIE 任务轮询：task_id=%s poll=%d/%d state=%s", task_id, attempt, attempts, state or "unknown")
+            if state == "success":
+                image_url = _extract_completed_url(task_payload)
+                if not image_url:
+                    raise ImageProviderError(
+                        f"{self.name} 任务成功，但响应中没有结果图片 URL。",
+                        provider=self.name,
+                        model=model_id,
+                        request_id=task_request_id,
+                        latency_ms=_elapsed_ms(started),
+                        error_code="missing_completed_url",
+                        fallback_allowed=False,
+                    )
+                try:
+                    _download(image_url, output_path)
+                except RuntimeError as exc:
+                    raise ImageProviderError(
+                        f"{self.name} 图片下载失败：{exc}",
+                        provider=self.name,
+                        model=model_id,
+                        request_id=task_request_id,
+                        latency_ms=_elapsed_ms(started),
+                        error_code="image_download_failed",
+                        fallback_allowed=True,
+                    ) from exc
+                return {
+                    "status": "success",
+                    "filepath": str(output_path),
+                    "url": image_url,
+                    "task_id": task_id,
+                    "provider": self.name,
+                    "model": model_id,
+                    "request_id": task_request_id,
+                    "latency_ms": _elapsed_ms(started),
+                    "error_code": "",
+                }
+            if state == "fail":
+                fail_code = str(data.get("failCode") or "task_failed")
+                fail_msg = str(data.get("failMsg") or task_payload)
+                raise ImageProviderError(
+                    f"{self.name} 任务失败：{fail_msg}",
+                    provider=self.name,
+                    model=model_id,
+                    request_id=task_request_id,
+                    latency_ms=_elapsed_ms(started),
+                    error_code=fail_code,
+                    fallback_allowed=_is_transient_code(fail_code),
+                )
+            time.sleep(interval)
+
+        raise ImageProviderError(
+            f"{self.name} 任务超时：{task_id}",
+            provider=self.name,
+            model=model_id,
+            request_id=request_id,
+            latency_ms=_elapsed_ms(started),
+            error_code="task_timeout",
+            fallback_allowed=True,
+        )
 
     def generate(
         self,
@@ -528,40 +743,45 @@ class VolcengineSeedreamProvider(ImageProvider):
         resolution: str,
         model: str | None = None,
     ) -> dict[str, Any]:
-        model_id = model or self.model
+        valid_reference_images = [path for path in reference_images if path.is_file()]
+        model_id = model or (self.image_model if valid_reference_images else self.text_model)
         if not self.api_key:
             raise ImageProviderError(
-                "缺少火山方舟 API Key：请配置 ARK_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.volcengine_seedream.api_key。",
+                "缺少 KIE API Key：请配置 KIE_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.kie.api_key。",
                 provider=self.name,
                 model=model_id,
                 error_code="missing_api_key",
                 fallback_allowed=True,
             )
 
-        image_urls = [image_to_data_url(path) for path in reference_images if path.is_file()]
-        payload: dict[str, Any] = {
-            "model": model_id,
-            "prompt": prompt,
-            "size": self._request_size(size, resolution),
-            "response_format": self.response_format,
-            "stream": False,
-            "watermark": self.watermark,
-            "sequential_image_generation": "disabled",
-        }
-        if self._supports_output_format(model_id) and self.output_format:
-            payload["output_format"] = self.output_format
-        if image_urls:
-            payload["image"] = image_urls[0] if len(image_urls) == 1 else image_urls
-
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        request_timeout = _env_int("POSTER_IMAGE_REQUEST_TIMEOUT_SECONDS", 120)
         started = time.perf_counter()
-        response: requests.Response | None = None
+        input_payload: dict[str, Any] = {
+            "prompt": prompt,
+            "aspect_ratio": self._request_aspect_ratio(size),
+        }
+        uploaded_urls: list[str] = []
+        if valid_reference_images:
+            uploaded_urls = self._upload_reference_images(valid_reference_images, started=started, model_id=model_id)
+            input_payload["input_urls"] = uploaded_urls
+        payload: dict[str, Any] = {"model": model_id, "input": input_payload}
+        if self.callback_url:
+            payload["callBackUrl"] = self.callback_url
+
+        logger.info(
+            "提交 KIE 生图任务：model=%s aspect_ratio=%s reference_images=%d timeout=%ss",
+            model_id,
+            input_payload["aspect_ratio"],
+            len(uploaded_urls),
+            request_timeout,
+        )
         try:
             response = self.session.post(
-                f"{self.base_url}/images/generations",
+                f"{self.base_url}/api/v1/jobs/createTask",
                 headers=headers,
                 json=payload,
-                timeout=_env_int("POSTER_IMAGE_REQUEST_TIMEOUT_SECONDS", 1200),
+                timeout=request_timeout,
             )
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RetryError) as exc:
             raise _network_error(self.name, model_id, exc, started) from exc
@@ -570,10 +790,9 @@ class VolcengineSeedreamProvider(ImageProvider):
 
         if response.status_code >= 400:
             raise _http_error(self.name, model_id, response, started)
-
         request_id = _response_request_id(response)
         try:
-            response_payload = response.json()
+            submit_payload = response.json()
         except ValueError as exc:
             raise ImageProviderError(
                 f"{self.name} 返回非 JSON 响应：{exc}",
@@ -584,83 +803,45 @@ class VolcengineSeedreamProvider(ImageProvider):
                 error_code="invalid_json",
                 fallback_allowed=False,
             ) from exc
-
-        payload_error_code, payload_error_message = _extract_error(response_payload)
-        if payload_error_code or payload_error_message:
+        if submit_payload.get("code", 200) not in (200, "200") and submit_payload.get("success") is not True:
+            code, message = _extract_error(submit_payload)
             raise ImageProviderError(
-                f"{self.name} 返回错误：{payload_error_message or payload_error_code}",
+                f"{self.name} 返回错误：{message or code or submit_payload}",
                 provider=self.name,
                 model=model_id,
                 request_id=request_id,
                 latency_ms=_elapsed_ms(started),
-                error_code=payload_error_code or "provider_error",
-                fallback_allowed=_is_transient_code(payload_error_code),
-            )
-
-        data = response_payload.get("data")
-        if not isinstance(data, list) or not data:
-            raise ImageProviderError(
-                f"{self.name} 未返回 data[0] 图片信息。",
-                provider=self.name,
-                model=model_id,
-                request_id=request_id,
-                latency_ms=_elapsed_ms(started),
-                error_code="missing_data",
-                fallback_allowed=False,
-            )
-
-        item = next((entry for entry in data if isinstance(entry, dict) and (entry.get("url") or entry.get("b64_json"))), None)
-        if not isinstance(item, dict):
-            item_error = next((entry.get("error") for entry in data if isinstance(entry, dict) and entry.get("error")), None)
-            code, message = _extract_error({"error": item_error})
-            raise ImageProviderError(
-                f"{self.name} 未返回图片 URL 或 b64_json：{message or code or data}",
-                provider=self.name,
-                model=model_id,
-                request_id=request_id,
-                latency_ms=_elapsed_ms(started),
-                error_code=code or "missing_image",
+                error_code=code or "provider_error",
                 fallback_allowed=_is_transient_code(code),
             )
-
-        remote_url = str(item.get("url") or "")
-        b64_json = str(item.get("b64_json") or "")
-        try:
-            if remote_url:
-                _download(remote_url, output_path)
-            elif b64_json:
-                _write_b64_image(b64_json, output_path)
-        except RuntimeError as exc:
+        task_id = _extract_task_id(submit_payload)
+        if not task_id:
             raise ImageProviderError(
-                f"{self.name} 图片保存失败：{exc}",
+                f"{self.name} 未返回 taskId。",
                 provider=self.name,
                 model=model_id,
                 request_id=request_id,
                 latency_ms=_elapsed_ms(started),
-                error_code="image_save_failed",
-                fallback_allowed=True,
-            ) from exc
-
-        return {
-            "status": "success",
-            "filepath": str(output_path),
-            "url": remote_url or None,
-            "task_id": None,
-            "provider": self.name,
+                error_code="missing_task_id",
+                fallback_allowed=False,
+            )
+        result = self._poll_task(
+            task_id=task_id,
+            headers=headers,
+            output_path=output_path,
+            model_id=model_id,
+            request_id=request_id,
+            started=started,
+            request_timeout=request_timeout,
+        )
+        result["reference_image_count"] = len(uploaded_urls)
+        result["request"] = {
+            "endpoint": "jobs/createTask",
+            "aspect_ratio": input_payload["aspect_ratio"],
             "model": model_id,
-            "request_id": request_id,
-            "latency_ms": _elapsed_ms(started),
-            "error_code": "",
-            "reference_image_count": len(image_urls),
-            "request": {
-                "size": payload["size"],
-                "response_format": payload["response_format"],
-                "stream": payload["stream"],
-                "watermark": payload["watermark"],
-                "output_format": payload.get("output_format"),
-                "model": model_id,
-            },
+            "uploaded_reference_count": len(uploaded_urls),
         }
+        return result
 
 
 class APIMartProvider(ImageProvider):
@@ -824,9 +1005,9 @@ class APIMartProvider(ImageProvider):
                 fallback_allowed=False,
             )
 
-        initial_delay = _env_int("POSTER_IMAGE_TASK_INITIAL_DELAY_SECONDS", 12)
-        attempts = _env_int("POSTER_IMAGE_TASK_POLL_ATTEMPTS", 24)
-        interval = _env_int("POSTER_IMAGE_TASK_POLL_INTERVAL_SECONDS", 5)
+        initial_delay = _env_int("POSTER_IMAGE_TASK_INITIAL_DELAY_SECONDS", DEFAULT_IMAGE_TASK_INITIAL_DELAY_SECONDS)
+        attempts = _env_int("POSTER_IMAGE_TASK_POLL_ATTEMPTS", DEFAULT_IMAGE_TASK_POLL_ATTEMPTS)
+        interval = _env_int("POSTER_IMAGE_TASK_POLL_INTERVAL_SECONDS", DEFAULT_IMAGE_TASK_POLL_INTERVAL_SECONDS)
         logger.info(
             "APIMart 任务已提交：task_id=%s initial_delay=%ss poll_attempts=%d poll_interval=%ss",
             task_id,
@@ -1154,9 +1335,9 @@ class AIHubMixProvider(ImageProvider):
         started: float,
         request_timeout: int,
     ) -> dict[str, Any]:
-        initial_delay = _env_int("POSTER_IMAGE_TASK_INITIAL_DELAY_SECONDS", 12)
-        attempts = _env_int("POSTER_IMAGE_TASK_POLL_ATTEMPTS", 24)
-        interval = _env_int("POSTER_IMAGE_TASK_POLL_INTERVAL_SECONDS", 5)
+        initial_delay = _env_int("POSTER_IMAGE_TASK_INITIAL_DELAY_SECONDS", DEFAULT_IMAGE_TASK_INITIAL_DELAY_SECONDS)
+        attempts = _env_int("POSTER_IMAGE_TASK_POLL_ATTEMPTS", DEFAULT_IMAGE_TASK_POLL_ATTEMPTS)
+        interval = _env_int("POSTER_IMAGE_TASK_POLL_INTERVAL_SECONDS", DEFAULT_IMAGE_TASK_POLL_INTERVAL_SECONDS)
         logger.info(
             "AIHubMix 任务已提交：task_id=%s initial_delay=%ss poll_attempts=%d poll_interval=%ss",
             task_id,
@@ -1696,13 +1877,120 @@ class AIHubMixProvider(ImageProvider):
         )
 
 
+class BuiltinImageGenProvider(ImageProvider):
+    name = BUILTIN_IMAGE_GEN_PROVIDER
+
+    @property
+    def api_key(self) -> str:
+        return "codex-image-gen"
+
+    @property
+    def base_url(self) -> str:
+        return "codex://image_gen"
+
+    @property
+    def model(self) -> str:
+        return "image_gen"
+
+    def health_check(self) -> dict[str, Any]:
+        return {
+            "provider": self.name,
+            "model": self.model,
+            "base_url": self.base_url,
+            "api_key_configured": True,
+            "reachable": True,
+            "http_status": None,
+            "latency_ms": 0,
+            "status": "agent_handoff",
+            "error": "由 Codex agent 调用内置 image_gen；Python 脚本只写交接请求，不直接生图。",
+        }
+
+    @staticmethod
+    def _request_path(output_path: Path) -> Path:
+        return output_path.with_name(f"{output_path.name}.imagegen-request.json")
+
+    def generate(
+        self,
+        *,
+        prompt: str,
+        reference_images: list[Path],
+        output_path: Path,
+        size: str,
+        resolution: str,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        request_path = self._request_path(output_path)
+        request_path.parent.mkdir(parents=True, exist_ok=True)
+        reference_order = ["template_example", "brand_logo", "brand_qr"][: len(reference_images)]
+        if len(reference_images) >= 3:
+            agent_steps = [
+                "按 reference_image_order 用 view_image 打开三张参考图，不能只把路径写进 prompt。",
+                "调用内置 image_gen 生成海报，Logo 必须来自第二张真实 Logo 输入图，二维码必须来自第三张真实二维码输入图。",
+                "将生成图片保存到 output_path 后，继续执行二维码验证；验证通过后再移动到 final_path。",
+            ]
+        elif len(reference_images) == 2:
+            agent_steps = [
+                "按 reference_image_order 用 view_image 打开模板图和真实 Logo 图，不能只把路径写进 prompt。",
+                "调用内置 image_gen 生成海报，Logo 必须来自第二张真实 Logo 输入图；不要生成二维码或伪扫码图案，保留干净扫码卡片。",
+                "将生成图片保存到 output_path 后，按调用方 asset_mode 贴入真实二维码并继续二维码验证。",
+            ]
+        elif reference_images:
+            agent_steps = [
+                "按 reference_image_order 用 view_image 打开参考图，不能只把路径写进 prompt。",
+                "调用内置 image_gen 生成海报；当前请求没有真实 Logo/二维码参考图时，不得生成假二维码。",
+                "将生成图片保存到 output_path 后，按调用方 asset_mode 继续后续处理。",
+            ]
+        else:
+            agent_steps = [
+                "当前请求没有参考图，按 prompt 生成草图。",
+                "不得生成假二维码或伪扫码图案。",
+                "将生成图片保存到 output_path 后，按调用方 asset_mode 继续后续处理。",
+            ]
+        request_payload = {
+            "provider": self.name,
+            "status": "agent_handoff",
+            "message": "外部图片 API 已回退到 Codex 内置 image_gen。请由 Codex agent 按 reference_images 顺序打开真实图片输入后调用 image_gen。",
+            "prompt": prompt,
+            "reference_images": [str(path) for path in reference_images],
+            "reference_image_order": reference_order,
+            "output_path": str(output_path),
+            "size": size,
+            "resolution": resolution,
+            "agent_steps": agent_steps,
+        }
+        request_path.write_text(json.dumps(request_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {
+            "status": "agent_handoff",
+            "filepath": str(output_path),
+            "url": None,
+            "task_id": None,
+            "provider": self.name,
+            "model": model or self.model,
+            "request_id": "",
+            "latency_ms": _elapsed_ms(started),
+            "error_code": "requires_agent_image_gen",
+            "reference_image_count": len(reference_images),
+            "imagegen_request_path": str(request_path),
+            "request": {
+                "endpoint": "codex_image_gen",
+                "size": size,
+                "resolution": resolution,
+                "model": self.model,
+            },
+        }
+
+
 def _build_provider(name: str) -> ImageProvider:
+    name = _normalize_provider_name(name)
+    if name == "kie":
+        return KIEProvider()
     if name == "aihubmix":
         return AIHubMixProvider()
-    if name == "volcengine_seedream":
-        return VolcengineSeedreamProvider()
     if name == "apimart":
         return APIMartProvider()
+    if name == BUILTIN_IMAGE_GEN_PROVIDER:
+        return BuiltinImageGenProvider()
     raise ImageProviderError(
         f"未知图片 provider：{name}",
         provider=name,
@@ -1751,9 +2039,10 @@ def require_api_key() -> str:
         missing.append(provider_name)
     raise RuntimeError(
         "缺少图片生成 API Key："
+        "KIE 请配置 KIE_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.kie.api_key；"
         "AIHubMix 请配置 AIHUBMIX_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.aihubmix.api_key；"
-        "火山方舟请配置 ARK_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.volcengine_seedream.api_key；"
-        "APIMart 请配置 APIMART_API_KEY/OPENAI_API_KEY 或 lx_haibao.image_api.apimart.api_key。"
+        "APIMart 请配置 APIMART_API_KEY/OPENAI_API_KEY 或 lx_haibao.image_api.apimart.api_key；"
+        "若要使用 Codex 内置兜底，请把 builtin_image_gen 加入 lx_haibao.image_api.providers。"
     )
 
 
@@ -1835,6 +2124,8 @@ def smoke_test_provider(
     model: str | None = None,
 ) -> dict[str, Any]:
     provider = _build_provider(provider_name.strip().lower())
+    if isinstance(provider, BuiltinImageGenProvider):
+        raise RuntimeError("builtin_image_gen 不能通过 Python 脚本 smoke；它需要 Codex agent 直接调用内置 image_gen。")
     try:
         if isinstance(provider, AIHubMixProvider):
             result = provider.generate_text_image(
@@ -1891,7 +2182,12 @@ def generateImage(prompt: str, options: dict[str, Any]) -> dict[str, Any]:
 def check_providers() -> dict[str, Any]:
     provider_order = _configured_provider_names()
     providers: list[dict[str, Any]] = []
-    for provider_name in ("aihubmix", "apimart", "volcengine_seedream"):
+    provider_names: list[str] = []
+    for provider_name in [*provider_order, "kie", "aihubmix", "apimart", BUILTIN_IMAGE_GEN_PROVIDER]:
+        normalized = _normalize_provider_name(provider_name)
+        if normalized not in provider_names:
+            provider_names.append(normalized)
+    for provider_name in provider_names:
         try:
             provider = _build_provider(provider_name)
             item = provider.health_check()

@@ -15,7 +15,7 @@ location: project
 
 | 模块 | 职责 |
 |------|------|
-| `database.py` | PostgreSQL 连接管理（DatabaseConnector） |
+| `database.py` | MySQL RDS 连接管理（DatabaseConnector） |
 | `hhdata_metrics.py` | 17 个日报指标计算公式、环比/同比函数 |
 | `metric_definitions.py` | 业务指标定义（MetricDefinition、FieldDefinition） |
 | `excel_utils.py` | 公司库码表映射加载、列检测、样式复制 |

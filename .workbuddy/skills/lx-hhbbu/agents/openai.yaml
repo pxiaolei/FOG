@@ -1,0 +1,6 @@
+interface:
+  display_name: "LX HHB补"
+  short_description: "按城市品牌导出 hhdata B补来源"
+  default_prompt: "Use $lx-hhbbu to query hhdata B subsidy and card merchant income by date, city_name, and brand_name."
+policy:
+  allow_implicit_invocation: true

@@ -19,7 +19,7 @@ logger = get_logger("lxx_share.query_builder")
 @dataclass
 class FieldSpec:
     """字段规格定义"""
-    db_name: str          # 数据库字段名（如 "f.completed_orders"）
+    db_name: str          # 数据库字段名（如 "f.completed_order_count"）
     display_name: str     # 显示名称（中文）
     data_type: str = "numeric"  # numeric, string, date
 
@@ -27,18 +27,18 @@ class FieldSpec:
 # 标准字段定义（所有分析类 skill 共享）
 STANDARD_FIELDS: Dict[str, FieldSpec] = {
     # 基础维度
-    "date":              FieldSpec("f.date", "日期", "date"),
+    "date_day":          FieldSpec("f.date_day", "日期", "date"),
     "city_id":           FieldSpec("f.city_id", "城市ID", "numeric"),
     "city_name":         FieldSpec("c.city_name", "城市名称", "string"),
     "brand_id":          FieldSpec("f.brand_id", "品牌ID", "numeric"),
     "brand_name":        FieldSpec("b.brand_name", "品牌名称", "string"),
 
     # 订单指标
-    "placed_orders":      FieldSpec("f.placed_orders", "乘客发单量", "numeric"),
+    "passenger_order_count": FieldSpec("f.passenger_order_count", "乘客发单量", "numeric"),
     "broadcast_orders":  FieldSpec("f.broadcast_orders", "播单量", "numeric"),
-    "matched_orders":    FieldSpec("f.matched_orders", "匹配量", "numeric"),
-    "answered_orders":   FieldSpec("f.answered_orders", "应答量", "numeric"),
-    "completed_orders":  FieldSpec("f.completed_orders", "完单数", "numeric"),
+    "match_count":       FieldSpec("f.match_count", "匹配量", "numeric"),
+    "response_count":    FieldSpec("f.response_count", "应答量", "numeric"),
+    "completed_order_count": FieldSpec("f.completed_order_count", "完单数", "numeric"),
 
     # 取消指标
     "cancelled_before_answer":  FieldSpec("f.cancelled_before_answer", "应答前取消订单量", "numeric"),
@@ -46,15 +46,15 @@ STANDARD_FIELDS: Dict[str, FieldSpec] = {
     "cancelled_by_driver":      FieldSpec("f.cancelled_by_driver", "应答后司机取消量", "numeric"),
 
     # 司机指标
-    "online_drivers":     FieldSpec("f.online_drivers", "在线司机数", "numeric"),
+    "online_driver_count": FieldSpec("f.online_driver_count", "在线司机数", "numeric"),
     "completed_drivers": FieldSpec("f.completed_drivers", "完单司机数", "numeric"),
-    "online_duration_hours": FieldSpec("f.online_duration_hours", "司机在线时长h", "numeric"),
-    "peak_online_drivers": FieldSpec("f.peak_online_drivers", "峰期在线司机数", "numeric"),
-    "peak_valid_drivers": FieldSpec("f.peak_valid_drivers", "峰期有效司机数", "numeric"),
-    "valid_drivers":      FieldSpec("f.valid_drivers", "有效司机数", "numeric"),
+    "online_duration_hour": FieldSpec("f.online_duration_hour", "司机在线时长h", "numeric"),
+    "peak_online_driver_count": FieldSpec("f.peak_online_driver_count", "峰期在线司机数", "numeric"),
+    "peak_valid_driver_count": FieldSpec("f.peak_valid_driver_count", "峰期有效司机数", "numeric"),
+    "valid_driver_count": FieldSpec("f.valid_driver_count", "有效司机数", "numeric"),
     "approved_drivers":   FieldSpec("f.approved_drivers", "审核通过司机数", "numeric"),
     "first_online_drivers": FieldSpec("f.first_online_drivers", "首次在线司机数", "numeric"),
-    "first_completed_drivers": FieldSpec("f.first_completed_drivers", "首次完单司机数", "numeric"),
+    "first_completion_driver_count": FieldSpec("f.first_completion_driver_count", "首次完单司机数", "numeric"),
 
     # 财务指标
     "gmv":                FieldSpec("f.gmv", "GMV", "numeric"),
@@ -73,15 +73,15 @@ class QueryBuilder:
     使用方式:
         builder = QueryBuilder()
         sql, params = (builder
-            .select(["date", "city_name", "completed_orders"])
+            .select(["date_day", "city_name", "completed_order_count"])
             .where_date(start="2026-01-01", end="2026-01-14")
             .where_city(city_id=1)
-            .order_by("date", ascending=False)
+            .order_by("date_day", ascending=False)
             .build())
     """
 
     # 默认表名（直接查事实表）
-    DEFAULT_TABLE = "hhdata.fact_daily_metrics"
+    DEFAULT_TABLE = "hhdata__fact_daily_metrics"
 
     def __init__(self, table_name: str = None):
         self.table_name = table_name or self.DEFAULT_TABLE
@@ -96,7 +96,7 @@ class QueryBuilder:
         选择要查询的字段
 
         Args:
-            fields: 字段名列表，如 ["date", "city_name", "completed_orders"]
+            fields: 字段名列表，如 ["date_day", "city_name", "completed_order_count"]
 
         Returns:
             self
@@ -118,14 +118,14 @@ class QueryBuilder:
 
     def where_date(self, start: Optional[str] = None,
                    end: Optional[str] = None,
-                   field: str = "date") -> "QueryBuilder":
+                   field: str = "date_day") -> "QueryBuilder":
         """
         添加日期过滤条件
 
         Args:
             start: 开始日期 (YYYY-MM-DD)
             end: 结束日期 (YYYY-MM-DD)
-            field: 日期字段名，默认 date
+            field: 日期字段名，默认 date_day
 
         Returns:
             self
@@ -216,9 +216,9 @@ class QueryBuilder:
         # 组装 SQL
         sql = f"SELECT {', '.join(field_exprs)} FROM {self.table_name} f"
         if needs_city:
-            sql += " JOIN mabiao.dim_cities c ON f.city_id = c.city_id"
+            sql += " JOIN mabiao__dim_cities c ON f.city_id = c.city_id"
         if needs_brand:
-            sql += " JOIN mabiao.dim_brands b ON f.brand_id = b.brand_id"
+            sql += " JOIN mabiao__dim_brands b ON f.brand_id = b.brand_id"
 
         sql += " WHERE 1=1"
         params = []
@@ -257,7 +257,7 @@ def build_simple_query(
     city_id: Optional[int] = None,
     brand_id: Optional[int] = None,
     fields: Optional[List[str]] = None,
-    order: str = "date",
+    order: str = "date_day",
     ascending: bool = False,
 ) -> Tuple[str, List[Any]]:
     """

@@ -193,12 +193,12 @@ ANOMALY_THRESHOLD_RATE = float(
 
 # ── 最小绝对值门槛（小基数指标波动大，低于门槛不检测异动）──
 MIN_ABSOLUTE_FOR_ANOMALY = {
-    "completed_orders": 10,
-    "placed_orders": 10,
+    "completed_order_count": 10,
+    "passenger_order_count": 10,
     "gmv": 1000,
-    "online_drivers": 5,
-    "online_duration_hours": 10,
-    "first_completed_drivers": 3,
+    "online_driver_count": 5,
+    "online_duration_hour": 10,
+    "first_completion_driver_count": 3,
     "avg_orders_per_driver": 0,
     "tph": 0,
     "unit_price": 0,
@@ -210,10 +210,10 @@ DEEP_ANALYSIS_TOP_K = int(_DAILYREPORT_CONFIG.get("deep_analysis_top_k", 5))
 # ── 从 hhdata 查询的原始字段 ──
 RAW_FIELDS = [
     "date", "city_id", "city_name", "brand_id", "brand_name",
-    "placed_orders", "completed_orders", "online_drivers",
-    "online_duration_hours", "first_completed_drivers", "gmv",
+    "passenger_order_count", "completed_order_count", "online_driver_count",
+    "online_duration_hour", "first_completion_driver_count", "gmv",
     "merchant_b_subsidy", "brand_commission", "card_merchant_income",
-    "completed_drivers", "cancelled_by_driver", "answered_orders",
+    "completed_drivers", "cancelled_by_driver", "response_count",
 ]
 
 

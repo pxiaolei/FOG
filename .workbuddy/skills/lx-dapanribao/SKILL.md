@@ -29,6 +29,7 @@ location: project
 |------|------|
 | 预览 | `python3 main.py --dry-run` 查看数据摘要，不发布 |
 | 生成 | `python3 main.py` 自动加载数据、构建日报、生成飞书普通表格发布计划 |
+| 发布 | `python3 publish_plan.py --plan ... --confirmed` 读取发布计划并写入飞书普通表格 |
 | 指定主体 | `python3 main.py --operator 江豚出行` 只处理指定主体 |
 
 ## 飞书普通表格发布机制
@@ -62,6 +63,12 @@ python3 main.py --person 雷维亮 --dry-run
 
 # 指定本地输出目录
 python3 main.py --output-dir workspace/03数据报表/日报
+
+# 预览发布计划执行，不写飞书
+python3 publish_plan.py --plan workspace/03数据报表/日报/dapanribao_publish_plan_0601.json --dry-run
+
+# 确认写入飞书；同名日期 Sheet 已存在时需显式允许覆盖
+python3 publish_plan.py --plan workspace/03数据报表/日报/dapanribao_publish_plan_0601.json --confirmed --search-drive --create-missing --create-folders --replace-sheet
 ```
 
 ## 指标清单
@@ -77,8 +84,8 @@ python3 main.py --output-dir workspace/03数据报表/日报
 
 ## 数据来源
 
-- `hhdata.fact_daily_metrics` — 主数据表
-- `mabiao.dim_cities` / `mabiao.dim_brands` — 维度表
+- `hhdata__fact_daily_metrics` — 主数据表
+- `mabiao__dim_cities` / `mabiao__dim_brands` — 维度表
 - `lx_shujuku.operator_brand` — 品牌/城市 → 运营主体 → 对接人映射
 
 ## 依赖
@@ -107,8 +114,10 @@ python3 main.py --output-dir workspace/03数据报表/日报
 
 1. 运行 `main.py --dry-run` 预览日报数据和发布计划。
 2. 确认无误后运行 `main.py` 生成完整发布计划 JSON。
-3. 使用 `lx-feishudocs`：
-   - 在飞书根文件夹下查找 `{运营主体}-运营主体` 文件夹；
-   - 在运营主体文件夹中查找或创建 `{运营主体}-大盘数据日报` 普通表格；
-   - 创建或替换日期 Sheet；
-   - 写入发布计划中的 `data_rows`。
+3. 运行 `publish_plan.py --dry-run` 读取计划，确认待发布主体、目标表格名、日期 Sheet 和行数。
+4. 确认后运行 `publish_plan.py --confirmed`：
+   - 优先读取 `dailyreport_cache.json` 中的飞书普通表格 token；
+   - 可用 `--search-drive` 在飞书根目录/主体目录下搜索目标文件夹和表格；
+   - 可用 `--create-missing` / `--create-folders` 补建缺失表格或文件夹；
+   - 同名日期 Sheet 已存在时默认停止，只有传 `--replace-sheet` 才会清空并覆盖；
+   - 写入发布计划中的 `data_rows` 后，读回表头和首列行数做验收。

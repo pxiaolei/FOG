@@ -80,7 +80,7 @@ def detect_anomalies(report_df: pd.DataFrame) -> List[AnomalyResult]:
         city_id = _safe_int(row.get("city_id"))
 
         for m in METRICS:
-            if m.key != "completed_orders":
+            if m.key != "completed_order_count":
                 continue
 
             threshold = ANOMALY_THRESHOLD_VOLUME
@@ -208,7 +208,7 @@ def deep_analyze_top_anomalies(
     对 Top K 异常调用 lx-yidongfenxi 做异动分析。
 
     日报归因只聚焦完单同比异动。完单归因逻辑由 lx-yidongfenxi 基于
-    hhdata.fact_daily_metrics 和 hhdata.fact_gongbu_strategy 计算，避免
+    hhdata__fact_daily_metrics 和 hhdata__fact_gongbu_strategy 计算，避免
     日报侧复制业务规则。
 
     Returns:
@@ -217,7 +217,7 @@ def deep_analyze_top_anomalies(
     if not anomalies:
         return ""
 
-    analyzable = [a for a in anomalies if a.metric_key == "completed_orders" and a.dimension == "yoy"]
+    analyzable = [a for a in anomalies if a.metric_key == "completed_order_count" and a.dimension == "yoy"]
 
     if not analyzable:
         return ""
@@ -286,10 +286,10 @@ def _format_dailyreport_completed_result(result: Dict[str, Any]) -> List[str]:
 
 def _deep_analysis_kind(metric_key: str) -> Optional[str]:
     mapping = {
-        "completed_orders": "completed",
+        "completed_order_count": "completed",
         "gmv": "completed",
-        "placed_orders": "order",
-        "online_drivers": "driver",
+        "passenger_order_count": "order",
+        "online_driver_count": "driver",
         "response_rate": "funnel",
         "completion_rate": "funnel",
         "merchant_b_subsidy_rate": "subsidy",

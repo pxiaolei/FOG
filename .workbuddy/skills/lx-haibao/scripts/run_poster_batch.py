@@ -37,6 +37,21 @@ from lxx_share.fog_config import get_section, resolve_project_path as resolve_fo
 logger = logging.getLogger("lx-haibao")
 
 
+DEFAULT_POSTER_OUTPUT_DIR = "workspace/09端外海报图/产出图"
+DEFAULT_POSTER_META_DIR = "workspace/09端外海报图/元数据"
+DEFAULT_POSTER_TMP_DIR = "workspace/09端外海报图/临时图"
+DEFAULT_POSTER_LOG_DIR = "workspace/09端外海报图/处理日志"
+DEFAULT_PROVIDER_SMOKE_DIR = "workspace/09端外海报图/临时图/provider-smoke"
+ASSET_MODE_INTEGRATED = "integrated"
+ASSET_MODE_HYBRID = "hybrid"
+ASSET_MODE_OVERLAY = "overlay"
+DEFAULT_ASSET_MODE = ASSET_MODE_HYBRID
+SIZE_POLICY_AUTO = "auto"
+SIZE_POLICY_FIXED = "fixed"
+DEFAULT_SIZE_POLICY = SIZE_POLICY_AUTO
+DEFAULT_LONG_POSTER_SIZE = "1:2"
+
+
 REQUIRED_RUNTIME_MODULES = {
     "requests": "requests",
     "Pillow": "PIL",
@@ -51,8 +66,11 @@ TXT 没有的活动模块不展示，不写"无""暂无""无卡券"。
 海报文案不得展示"共补""共补免佣""平台共补""是否共补"等内部补贴属性。
 卡券按日期展示，每个日期内先分"全天卡"和"时段卡"，时段卡按时间从早到晚。
 新人免佣奖只展示免佣天数，不展示适用订单；新人成长奖才展示首单奖励、X天完成X单奖励等任务规则。
-二维码必须使用第三张参考图中的品牌真实二维码，保持正方形、清晰、完整、无遮挡、不倾斜、不透视、不裁切、不拉伸、不重绘。
 不要生成替代二维码、假二维码、二维码纹理、条形码或抽象扫码图案。"""
+
+REFERENCE_IMAGE_RULES = """模板示例图中的"品牌占位""城市名称占位""二维码占位区""X元"以及旧日期、旧金额、旧奖励都是占位或旧内容，不得原样保留到新海报。品牌 Logo 只来自真实 Logo 参考图；二维码按 asset_mode 由真实二维码参考图生成或由脚本贴入。"""
+
+TEXT_TO_IMAGE_RULES = """本次不传模板图，只按结构化版式说明生成；不要显示任何模板说明、坐标、占位标签、示例价格、旧日期、旧金额或伪二维码文案。text-to-image 不适用于默认真实 Logo 融合链路；正式成品应使用模板+Logo参考图生成，二维码由脚本贴入并验真。"""
 
 CITY_PATTERN = re.compile(r"[\u4e00-\u9fff]{2,12}(?:市|县|区|州|盟)")
 SECTION_HEADING_PATTERN = re.compile(r"^【\s*(.+?)\s*】\s*$")
@@ -149,26 +167,33 @@ def import_errors() -> list[str]:
 
 
 def output_dirs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
-    root = skill_root()
     config = get_section("lx_haibao", Path(__file__))
 
     output_value = args.output_dir or os.environ.get("POSTER_OUTPUT_DIR") or config.get("output_dir")
     meta_value = os.environ.get("POSTER_META_DIR") or config.get("meta_dir")
     tmp_value = os.environ.get("POSTER_TMP_DIR") or config.get("tmp_dir")
 
-    output = resolve_fog_path(output_value, Path(__file__)) if output_value else root / "output" / "posters"
-    meta = resolve_fog_path(meta_value, Path(__file__)) if meta_value else root / "output" / "meta"
-    tmp = resolve_fog_path(tmp_value, Path(__file__)) if tmp_value else root / "output" / "tmp"
+    output = resolve_fog_path(output_value or DEFAULT_POSTER_OUTPUT_DIR, Path(__file__))
+    meta = resolve_fog_path(meta_value or DEFAULT_POSTER_META_DIR, Path(__file__))
+    tmp = resolve_fog_path(tmp_value or DEFAULT_POSTER_TMP_DIR, Path(__file__))
     output.mkdir(parents=True, exist_ok=True)
     meta.mkdir(parents=True, exist_ok=True)
     tmp.mkdir(parents=True, exist_ok=True)
     return output.resolve(), meta.resolve(), tmp.resolve()
 
 
+def log_dir() -> Path:
+    config = get_section("lx_haibao", Path(__file__))
+    log_value = os.environ.get("POSTER_LOG_DIR") or config.get("log_dir") or DEFAULT_POSTER_LOG_DIR
+    path = resolve_fog_path(log_value, Path(__file__))
+    path.mkdir(parents=True, exist_ok=True)
+    return path.resolve()
+
+
 def select_template(template_id: str | None = None) -> dict[str, Any]:
     templates = load_templates(skill_root())
     if not templates:
-        raise RuntimeError("templates.yaml 中没有可用模板。")
+        raise RuntimeError("assets/templates/templates.yaml 中没有可用模板。")
     if template_id:
         for template in templates:
             if template["template_id"] == template_id:
@@ -176,6 +201,36 @@ def select_template(template_id: str | None = None) -> dict[str, Any]:
         available = ", ".join(template["template_id"] for template in templates)
         raise RuntimeError(f"未知模板：{template_id}。可用模板：{available}")
     return templates[0]
+
+
+def brand_preferred_template_id(brand: dict[str, Any]) -> str:
+    template_config = brand.get("template")
+    if not isinstance(template_config, dict):
+        return ""
+    return str(template_config.get("preferred_template_id") or "").strip()
+
+
+def select_template_for_brand(
+    brand: dict[str, Any],
+    *,
+    forced_template_id: str | None,
+    default_template: dict[str, Any],
+) -> dict[str, Any]:
+    if forced_template_id:
+        return default_template
+    preferred_id = brand_preferred_template_id(brand)
+    if preferred_id:
+        return select_template(preferred_id)
+    return default_template
+
+
+def template_for_row(
+    row: dict[str, Any],
+    *,
+    default_template: dict[str, Any],
+    templates_by_brand_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    return templates_by_brand_id.get(str(row.get("brand_id") or ""), default_template)
 
 
 def build_rows(paths: list[Path], brands: list[dict[str, Any]], city_override: str | None = None) -> list[dict[str, Any]]:
@@ -212,17 +267,587 @@ def build_rows(paths: list[Path], brands: list[dict[str, Any]], city_override: s
     return rows
 
 
-def reference_paths(brand: dict[str, Any], template: dict[str, Any]) -> list[Path]:
+def template_layout_description(template: dict[str, Any]) -> str:
+    root = skill_root()
+    layout_raw = template.get("layout_description_path")
+    if layout_raw:
+        layout_path = resolve_path(str(layout_raw), root)
+        if layout_path.is_file():
+            return read_text_guess(layout_path).strip()
+    template_id = str(template.get("template_id") or "template")
+    return (
+        f"竖版 9:16 司机活动海报，使用 {template_id} 的卡片式运营海报结构："
+        "顶部城市道路和车辆主视觉，中部活动权益卡片矩阵，底部扫码加入服务横条。"
+        "顶部品牌区和底部扫码区要与整张海报自然融合；不要使用模板旧品牌、旧二维码或占位内容。"
+    )
+
+
+def reference_paths(
+    brand: dict[str, Any],
+    template: dict[str, Any],
+    *,
+    use_reference_images: bool = True,
+    asset_mode: str = DEFAULT_ASSET_MODE,
+) -> list[Path]:
+    if not use_reference_images:
+        return []
     root = skill_root()
     paths = [
         resolve_path(template["example_path"], root),
-        resolve_path(brand.get("assets", {}).get("logo_path", ""), root),
-        resolve_path(brand.get("assets", {}).get("qr_path", ""), root),
     ]
+    assets = brand.get("assets") if isinstance(brand.get("assets"), dict) else {}
+    if asset_mode in {ASSET_MODE_HYBRID, ASSET_MODE_INTEGRATED}:
+        paths.append(resolve_path(str(assets.get("logo_path") or ""), root))
+    if asset_mode == ASSET_MODE_INTEGRATED:
+        paths.extend(
+            [
+                resolve_path(str(assets.get("qr_path") or ""), root),
+            ]
+        )
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
         raise RuntimeError("参考图缺失：" + "；".join(missing))
     return paths
+
+
+def _ratio_value(config: dict[str, Any], key: str, default: float) -> float:
+    try:
+        return float(config.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _paste_image_in_box(
+    *,
+    poster: Any,
+    asset_path: Path,
+    box: dict[str, int],
+    resample: Any,
+    background: bool,
+    padding: int,
+) -> None:
+    from PIL import Image, ImageDraw
+
+    asset = Image.open(asset_path).convert("RGBA")
+    width = max(1, int(box["width"]))
+    height = max(1, int(box["height"]))
+    scale = min(width / asset.width, height / asset.height)
+    target_size = (max(1, int(asset.width * scale)), max(1, int(asset.height * scale)))
+    resized = asset.resize(target_size, resample)
+    x = int(box["x"] + (width - target_size[0]) / 2)
+    y = int(box["y"] + (height - target_size[1]) / 2)
+
+    if background:
+        draw = ImageDraw.Draw(poster)
+        draw.rounded_rectangle(
+            (
+                max(0, box["x"] - padding),
+                max(0, box["y"] - padding),
+                min(poster.width, box["x"] + width + padding),
+                min(poster.height, box["y"] + height + padding),
+            ),
+            radius=max(8, padding),
+            fill="white",
+        )
+    poster.paste(resized, (x, y), resized if resized.mode == "RGBA" else None)
+
+
+def _fit_font(text: str, font_path: str, *, max_width: int, max_height: int) -> Any:
+    from PIL import ImageFont
+
+    fallback_paths = [
+        font_path,
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/System/Library/Fonts/Supplemental/Songti.ttc",
+    ]
+    usable_paths = [path for path in fallback_paths if path]
+    for size in range(max(12, max_height), 11, -2):
+        for path in usable_paths:
+            try:
+                font = ImageFont.truetype(path, size)
+            except OSError:
+                continue
+            left, top, right, bottom = font.getbbox(text)
+            if right - left <= max_width and bottom - top <= max_height:
+                return font
+    return ImageFont.load_default()
+
+
+def _draw_text_chip_logo(
+    *,
+    poster: Any,
+    brand: dict[str, Any],
+    box: dict[str, int],
+    overlay_config: dict[str, Any],
+    padding: int,
+) -> dict[str, Any]:
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(poster)
+    text = str(
+        overlay_config.get("text")
+        or brand.get("display", {}).get("poster_brand_name")
+        or brand.get("canonical_name")
+        or ""
+    ).strip()
+    if not text:
+        return {"applied": False, "error": "draw_text_chip_text_empty"}
+
+    x0 = max(0, box["x"] - padding)
+    y0 = max(0, box["y"] - padding)
+    x1 = min(poster.width, box["x"] + box["width"] + padding)
+    y1 = min(poster.height, box["y"] + box["height"] + padding)
+    radius = max(12, int((y1 - y0) * 0.28))
+    fill = str(overlay_config.get("fill") or "#FFFFFF")
+    border = str(overlay_config.get("border") or "#DCEBFF")
+    text_color = str(overlay_config.get("text_color") or "#078DFF")
+
+    draw.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=fill, outline=border, width=max(2, padding // 3 or 2))
+
+    inner_padding = max(8, int((x1 - x0) * 0.10))
+    font = _fit_font(
+        text,
+        str(overlay_config.get("font_path") or ""),
+        max_width=max(1, x1 - x0 - inner_padding * 2),
+        max_height=max(1, y1 - y0 - inner_padding),
+    )
+    left, top, right, bottom = font.getbbox(text)
+    text_width = right - left
+    text_height = bottom - top
+    tx = x0 + (x1 - x0 - text_width) / 2 - left
+    ty = y0 + (y1 - y0 - text_height) / 2 - top
+    draw.text((tx, ty), text, font=font, fill=text_color)
+    return {
+        "applied": True,
+        "method": "draw_text_chip_logo",
+        "text": text,
+        "box": {"x": box["x"], "y": box["y"], "width": box["width"], "height": box["height"]},
+    }
+
+
+def _draw_logo_lockup(
+    *,
+    poster: Any,
+    brand: dict[str, Any],
+    box: dict[str, int],
+    overlay_config: dict[str, Any],
+) -> dict[str, Any]:
+    from PIL import ImageDraw
+
+    icon_text = str(
+        overlay_config.get("text")
+        or brand.get("display", {}).get("poster_brand_name")
+        or brand.get("canonical_name")
+        or ""
+    ).strip()
+    wordmark_text = str(overlay_config.get("wordmark_text") or icon_text).strip()
+    if not icon_text and not wordmark_text:
+        return {"applied": False, "error": "draw_logo_lockup_text_empty"}
+
+    draw = ImageDraw.Draw(poster)
+    icon_size = max(32, min(box["height"], int(box["width"] * 0.36)))
+    icon_x = box["x"]
+    icon_y = box["y"] + int((box["height"] - icon_size) / 2)
+    radius = max(8, int(icon_size * 0.18))
+    icon_fill = str(overlay_config.get("icon_fill") or "#078DFF")
+    icon_text_color = str(overlay_config.get("icon_text_color") or "#FFFFFF")
+    wordmark_color = str(overlay_config.get("wordmark_color") or "#111111")
+
+    shadow_offset = max(1, int(icon_size * 0.035))
+    draw.rounded_rectangle(
+        (icon_x + shadow_offset, icon_y + shadow_offset, icon_x + icon_size + shadow_offset, icon_y + icon_size + shadow_offset),
+        radius=radius,
+        fill=(0, 75, 180, 42),
+    )
+    draw.rounded_rectangle((icon_x, icon_y, icon_x + icon_size, icon_y + icon_size), radius=radius, fill=icon_fill)
+
+    icon_font = _fit_font(
+        icon_text,
+        str(overlay_config.get("font_path") or ""),
+        max_width=max(1, int(icon_size * 0.78)),
+        max_height=max(1, int(icon_size * 0.48)),
+    )
+    left, top, right, bottom = icon_font.getbbox(icon_text)
+    text_width = right - left
+    text_height = bottom - top
+    icon_tx = icon_x + (icon_size - text_width) / 2 - left
+    icon_ty = icon_y + (icon_size - text_height) / 2 - top
+    draw.text((icon_tx, icon_ty), icon_text, font=icon_font, fill=icon_text_color)
+
+    wordmark_x = icon_x + icon_size + max(10, int(icon_size * 0.18))
+    wordmark_width = max(1, box["x"] + box["width"] - wordmark_x)
+    wordmark_font = _fit_font(
+        wordmark_text,
+        str(overlay_config.get("font_path") or ""),
+        max_width=wordmark_width,
+        max_height=max(1, int(icon_size * 0.62)),
+    )
+    left, top, right, bottom = wordmark_font.getbbox(wordmark_text)
+    wordmark_height = bottom - top
+    wordmark_y = icon_y + (icon_size - wordmark_height) / 2 - top
+    draw.text(
+        (wordmark_x, wordmark_y),
+        wordmark_text,
+        font=wordmark_font,
+        fill=wordmark_color,
+        stroke_width=max(1, int(icon_size * 0.018)),
+        stroke_fill=(255, 255, 255, 190),
+    )
+    return {
+        "applied": True,
+        "method": "draw_logo_lockup",
+        "text": icon_text,
+        "wordmark_text": wordmark_text,
+        "box": {"x": box["x"], "y": box["y"], "width": box["width"], "height": box["height"]},
+        "icon_box": {"x": icon_x, "y": icon_y, "size": icon_size},
+    }
+
+
+def overlay_poster_logo(poster_path: Path, brand: dict[str, Any]) -> dict[str, Any]:
+    from PIL import Image
+
+    root = skill_root()
+    overlay_config = brand.get("logo_overlay") if isinstance(brand.get("logo_overlay"), dict) else {}
+    if not overlay_config:
+        return {"applied": False, "error": "brand_logo_overlay_not_configured"}
+
+    poster = Image.open(poster_path).convert("RGBA")
+    width, height = poster.size
+    box = {
+        "x": int(width * _ratio_value(overlay_config, "x_ratio", 0.05)),
+        "y": int(height * _ratio_value(overlay_config, "y_ratio", 0.025)),
+        "width": int(width * _ratio_value(overlay_config, "width_ratio", 0.14)),
+        "height": int(height * _ratio_value(overlay_config, "height_ratio", 0.07)),
+    }
+    padding = max(0, int(width * _ratio_value(overlay_config, "padding_ratio", 0.0)))
+    if str(overlay_config.get("mode") or "").strip().lower() == "draw_text_chip":
+        result = _draw_text_chip_logo(
+            poster=poster,
+            brand=brand,
+            box=box,
+            overlay_config=overlay_config,
+            padding=padding,
+        )
+        if result.get("applied"):
+            poster.convert("RGB").save(poster_path)
+        return result
+    if str(overlay_config.get("mode") or "").strip().lower() == "draw_logo_lockup":
+        result = _draw_logo_lockup(
+            poster=poster,
+            brand=brand,
+            box=box,
+            overlay_config=overlay_config,
+        )
+        if result.get("applied"):
+            poster.convert("RGB").save(poster_path)
+        return result
+
+    assets = brand.get("assets") if isinstance(brand.get("assets"), dict) else {}
+    logo_raw = assets.get("logo_path")
+    if not logo_raw:
+        return {"applied": False, "error": "brand_logo_not_configured"}
+    logo_path = resolve_path(str(logo_raw), root)
+    if not logo_path.is_file():
+        return {"applied": False, "error": f"brand_logo_not_found: {logo_path}"}
+    _paste_image_in_box(
+        poster=poster,
+        asset_path=logo_path,
+        box=box,
+        resample=Image.Resampling.LANCZOS,
+        background=bool(overlay_config.get("background", False)),
+        padding=padding,
+    )
+    poster.convert("RGB").save(poster_path)
+    return {"applied": True, "method": "source_logo_overlay", "logo_path": str(logo_path), "box": box}
+
+
+def _detect_footer_blue_band(poster: Any) -> tuple[int, int] | None:
+    width, height = poster.size
+    sample_step = max(1, width // 180)
+    min_blue_fraction = 0.44
+    max_gap = max(8, int(height * 0.02))
+    rows: list[int] = []
+
+    for y in range(int(height * 0.62), height):
+        sampled = 0
+        blue = 0
+        for x in range(0, width, sample_step):
+            r, g, b = poster.getpixel((x, y))[:3]
+            sampled += 1
+            if b >= 145 and g >= 45 and r <= 90 and b >= g + 35 and b >= r + 70:
+                blue += 1
+        if sampled and blue / sampled >= min_blue_fraction:
+            rows.append(y)
+
+    if not rows:
+        return None
+
+    groups: list[tuple[int, int]] = []
+    start = prev = rows[0]
+    for y in rows[1:]:
+        if y <= prev + max_gap:
+            prev = y
+            continue
+        groups.append((start, prev))
+        start = prev = y
+    groups.append((start, prev))
+
+    candidates = [
+        group
+        for group in groups
+        if group[1] >= int(height * 0.9) and group[1] - group[0] >= max(24, int(height * 0.045))
+    ]
+    return candidates[-1] if candidates else None
+
+
+def _detect_footer_bottom_band(poster: Any) -> tuple[int, int] | None:
+    footer_band = _detect_footer_blue_band(poster)
+    if footer_band:
+        return footer_band
+
+    width, height = poster.size
+    sample_step = max(1, width // 180)
+    min_fraction = 0.34
+    max_gap = max(8, int(height * 0.02))
+    bottom_samples: list[tuple[int, int, int]] = []
+    for y in range(max(0, height - max(12, height // 60)), height):
+        for x in range(int(width * 0.05), int(width * 0.95), sample_step):
+            r, g, b = poster.getpixel((x, y))[:3]
+            if not (r >= 230 and g >= 230 and b >= 230):
+                bottom_samples.append((r, g, b))
+    if not bottom_samples:
+        return None
+
+    base = tuple(sum(pixel[index] for pixel in bottom_samples) // len(bottom_samples) for index in range(3))
+
+    def similar_to_bottom(pixel: tuple[int, int, int]) -> bool:
+        r, g, b = pixel
+        return abs(r - base[0]) + abs(g - base[1]) + abs(b - base[2]) <= 115
+
+    rows: list[int] = []
+    for y in range(int(height * 0.62), height):
+        sampled = 0
+        similar = 0
+        for x in range(0, width, sample_step):
+            sampled += 1
+            if similar_to_bottom(poster.getpixel((x, y))[:3]):
+                similar += 1
+        if sampled and similar / sampled >= min_fraction:
+            rows.append(y)
+
+    if not rows:
+        return None
+
+    groups: list[tuple[int, int]] = []
+    start = prev = rows[0]
+    for y in rows[1:]:
+        if y <= prev + max_gap:
+            prev = y
+            continue
+        groups.append((start, prev))
+        start = prev = y
+    groups.append((start, prev))
+
+    candidates = [
+        group
+        for group in groups
+        if group[1] >= int(height * 0.9) and group[1] - group[0] >= max(24, int(height * 0.045))
+    ]
+    return candidates[-1] if candidates else None
+
+
+def _footer_blue_fill(poster: Any, footer_band: tuple[int, int] | None) -> tuple[int, int, int, int]:
+    width, height = poster.size
+    top, bottom = footer_band or (int(height * 0.9), height - 1)
+    colors: list[tuple[int, int, int]] = []
+    for y in range(top, bottom + 1, max(1, (bottom - top) // 12 or 1)):
+        for x in range(int(width * 0.05), int(width * 0.55), max(1, width // 80)):
+            r, g, b = poster.getpixel((x, y))[:3]
+            if b >= 145 and g >= 45 and r <= 90 and b >= g + 35 and b >= r + 70:
+                colors.append((r, g, b))
+    if not colors:
+        for y in range(top, bottom + 1, max(1, (bottom - top) // 12 or 1)):
+            for x in range(int(width * 0.05), int(width * 0.55), max(1, width // 80)):
+                r, g, b = poster.getpixel((x, y))[:3]
+                if not (r >= 230 and g >= 230 and b >= 230):
+                    colors.append((r, g, b))
+    if not colors:
+        return (0, 94, 216, 255)
+    r = sum(item[0] for item in colors) // len(colors)
+    g = sum(item[1] for item in colors) // len(colors)
+    b = sum(item[2] for item in colors) // len(colors)
+    return (r, g, b, 255)
+
+
+def _needs_qr_background_cleanup(poster: Any, box: tuple[int, int, int, int]) -> bool:
+    left, top, right, bottom = box
+    width = max(1, right - left)
+    height = max(1, bottom - top)
+    step_x = max(1, width // 40)
+    step_y = max(1, height // 40)
+    sampled = 0
+    light = 0
+    for y in range(top, bottom, step_y):
+        for x in range(left, right, step_x):
+            r, g, b = poster.getpixel((x, y))[:3]
+            sampled += 1
+            if r >= 220 and g >= 220 and b >= 220:
+                light += 1
+    return bool(sampled and light / sampled >= 0.12)
+
+
+def overlay_poster_qr(poster_path: Path, brand: dict[str, Any], template: dict[str, Any]) -> dict[str, Any]:
+    from PIL import Image, ImageDraw, ImageFilter
+
+    root = skill_root()
+    qr_config = brand.get("qr_validation") if isinstance(brand.get("qr_validation"), dict) else {}
+    assets = brand.get("assets") if isinstance(brand.get("assets"), dict) else {}
+    qr_raw = qr_config.get("expected_qr_path") or assets.get("qr_path")
+    if not qr_raw:
+        return {"applied": False, "error": "brand_qr_not_configured"}
+    qr_path = resolve_path(str(qr_raw), root)
+    if not qr_path.is_file():
+        return {"applied": False, "error": f"brand_qr_not_found: {qr_path}"}
+    if not poster_path.is_file():
+        return {"applied": False, "error": f"poster_not_found: {poster_path}"}
+
+    overlay_config = template.get("qr_overlay") if isinstance(template.get("qr_overlay"), dict) else {}
+    if not overlay_config:
+        return {"applied": False, "error": "template_qr_overlay_not_configured"}
+
+    poster = Image.open(poster_path).convert("RGBA")
+    width, height = poster.size
+    qr_size = max(96, int(width * _ratio_value(overlay_config, "size_ratio", 0.16)))
+    box = {
+        "x": int(width * _ratio_value(overlay_config, "x_ratio", 0.78)),
+        "y": int(height * _ratio_value(overlay_config, "y_ratio", 0.087)),
+        "width": qr_size,
+        "height": qr_size,
+    }
+    box["x"] = max(0, min(box["x"], width - qr_size))
+    box["y"] = max(0, min(box["y"], height - qr_size))
+    padding = max(8, int(qr_size * _ratio_value(overlay_config, "padding_ratio", 0.08)))
+    card_size = qr_size + padding * 2
+    footer_band: tuple[int, int] | None = None
+    anchor = str(overlay_config.get("anchor") or "").strip().lower()
+    right_margin = max(12, int(width * _ratio_value(overlay_config, "right_margin_ratio", 0.035)))
+    bottom_margin = max(12, int(width * _ratio_value(overlay_config, "bottom_margin_ratio", 0.035)))
+    if anchor == "bottom_right":
+        if bool(overlay_config.get("ensure_footer_min_height", True)):
+            footer_band = _detect_footer_bottom_band(poster)
+            if footer_band:
+                footer_top, _footer_bottom = footer_band
+                top_clearance = max(8, int(card_size * _ratio_value(overlay_config, "footer_top_clearance_ratio", 0.08)))
+                required_height = footer_top + top_clearance + card_size + bottom_margin
+                if height < required_height:
+                    extra_height = required_height - height
+                    extended = Image.new("RGBA", (width, height + extra_height), _footer_blue_fill(poster, footer_band))
+                    extended.alpha_composite(poster, (0, 0))
+                    poster = extended
+                    height = height + extra_height
+                    footer_band = (footer_top, height - 1)
+        card_x = max(0, min(width - right_margin - card_size, width - card_size))
+        card_y = max(0, min(height - bottom_margin - card_size, height - card_size))
+    elif anchor == "footer_right":
+        footer_band = _detect_footer_bottom_band(poster)
+        card_x = max(0, min(width - right_margin - card_size, width - card_size))
+        if footer_band:
+            footer_top, footer_bottom = footer_band
+            footer_height = footer_bottom - footer_top + 1
+            if footer_height >= card_size:
+                card_y = footer_top + max(0, int((footer_height - card_size) / 2))
+            else:
+                card_y = height - bottom_margin - card_size
+        else:
+            card_y = height - bottom_margin - card_size
+        card_y = max(0, min(card_y, height - card_size))
+    else:
+        card_x = max(0, min(box["x"] - padding, width - card_size))
+        card_y = max(0, min(box["y"] - padding, height - card_size))
+    radius = max(10, int(card_size * _ratio_value(overlay_config, "radius_ratio", 0.08)))
+
+    if anchor == "footer_right" and bool(overlay_config.get("cleanup_background", True)):
+        draw = ImageDraw.Draw(poster)
+        cleanup_left = max(0, card_x - int(card_size * _ratio_value(overlay_config, "cleanup_left_ratio", 0.7)))
+        cleanup_top = max(footer_band[0] if footer_band else 0, card_y - int(card_size * _ratio_value(overlay_config, "cleanup_top_ratio", 0.08)))
+        cleanup_right = min(width, card_x + card_size + int(card_size * 0.08))
+        cleanup_bottom = min(height, card_y + card_size + int(card_size * 0.12))
+        cleanup_box = (cleanup_left, cleanup_top, cleanup_right, cleanup_bottom)
+        if _needs_qr_background_cleanup(poster, cleanup_box):
+            draw.rounded_rectangle(
+                cleanup_box,
+                radius=max(10, int(card_size * 0.08)),
+                fill=_footer_blue_fill(poster, footer_band),
+            )
+
+    shadow = Image.new("RGBA", poster.size, (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_offset = max(2, int(card_size * 0.018))
+    shadow_draw.rounded_rectangle(
+        (
+            card_x + shadow_offset,
+            card_y + shadow_offset,
+            card_x + card_size + shadow_offset,
+            card_y + card_size + shadow_offset,
+        ),
+        radius=radius,
+        fill=(2, 42, 120, 42),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(max(3, int(card_size * 0.025))))
+    poster = Image.alpha_composite(poster, shadow)
+
+    card = Image.new("RGBA", (card_size, card_size), (0, 0, 0, 0))
+    card_draw = ImageDraw.Draw(card)
+    card_draw.rounded_rectangle(
+        (0, 0, card_size - 1, card_size - 1),
+        radius=radius,
+        fill=(255, 255, 255, 255),
+        outline=(192, 218, 255, 255),
+        width=max(1, int(card_size * 0.01)),
+    )
+
+    qr = Image.open(qr_path).convert("RGBA")
+    qr_canvas = Image.new("RGBA", qr.size, (255, 255, 255, 255))
+    qr_canvas.alpha_composite(qr)
+    qr = qr_canvas.resize((qr_size, qr_size), Image.Resampling.NEAREST)
+    card.alpha_composite(qr, (padding, padding))
+    poster.alpha_composite(card, (card_x, card_y))
+    poster.convert("RGB").save(poster_path)
+    return {
+        "applied": True,
+        "method": "source_qr_card_overlay",
+        "qr_path": str(qr_path),
+        "box": {
+            "x": card_x,
+            "y": card_y,
+            "card_size": card_size,
+            "qr_x": card_x + padding,
+            "qr_y": card_y + padding,
+            "qr_size": qr_size,
+            "padding": padding,
+            "anchor": anchor or "ratio",
+            "footer_band": footer_band,
+        },
+    }
+
+
+def apply_deterministic_assets(poster_path: Path, brand: dict[str, Any], template: dict[str, Any]) -> dict[str, Any]:
+    logo_result = overlay_poster_logo(poster_path, brand)
+    qr_result = overlay_poster_qr(poster_path, brand, template)
+    return {
+        "logo": logo_result,
+        "qr": qr_result,
+        "ok": bool(logo_result.get("applied") and qr_result.get("applied")),
+    }
+
+
+def apply_hybrid_assets(poster_path: Path, brand: dict[str, Any], template: dict[str, Any]) -> dict[str, Any]:
+    qr_result = overlay_poster_qr(poster_path, brand, template)
+    return {
+        "logo": {"applied": False, "method": "model_integrated"},
+        "qr": qr_result,
+        "ok": bool(qr_result.get("applied")),
+    }
 
 
 def text_preview(text: str, limit: int = 18) -> list[str]:
@@ -244,6 +869,77 @@ def detect_modules(text: str) -> list[str]:
         if re.search(pattern, text):
             modules.append(label)
     return modules
+
+
+def non_empty_line_count(text: str) -> int:
+    return len([line for line in text.splitlines() if line.strip()])
+
+
+def poster_size_plan(
+    *,
+    display_text: str,
+    template: dict[str, Any],
+    base_size: str,
+    size_policy: str,
+) -> dict[str, Any]:
+    modules = detect_modules(display_text)
+    line_count = non_empty_line_count(display_text)
+    char_count = len(display_text)
+    sizing = template.get("content_sizing") if isinstance(template.get("content_sizing"), dict) else {}
+    long_size = str(sizing.get("long_size") or DEFAULT_LONG_POSTER_SIZE)
+    try:
+        module_threshold = int(sizing.get("long_module_threshold") or 6)
+    except (TypeError, ValueError):
+        module_threshold = 6
+    try:
+        line_threshold = int(sizing.get("long_line_threshold") or 28)
+    except (TypeError, ValueError):
+        line_threshold = 28
+    try:
+        char_threshold = int(sizing.get("long_char_threshold") or 560)
+    except (TypeError, ValueError):
+        char_threshold = 560
+
+    reasons: list[str] = []
+    if len(modules) >= module_threshold:
+        reasons.append(f"模块数 {len(modules)} >= {module_threshold}")
+    if line_count >= line_threshold:
+        reasons.append(f"可展示行数 {line_count} >= {line_threshold}")
+    if char_count >= char_threshold:
+        reasons.append(f"可展示字符数 {char_count} >= {char_threshold}")
+
+    if size_policy == SIZE_POLICY_FIXED:
+        return {
+            "mode": "fixed",
+            "size": base_size,
+            "base_size": base_size,
+            "size_policy": size_policy,
+            "module_count": len(modules),
+            "line_count": line_count,
+            "char_count": char_count,
+            "reasons": reasons,
+        }
+    if size_policy == SIZE_POLICY_AUTO and reasons:
+        return {
+            "mode": "long",
+            "size": long_size,
+            "base_size": base_size,
+            "size_policy": size_policy,
+            "module_count": len(modules),
+            "line_count": line_count,
+            "char_count": char_count,
+            "reasons": reasons,
+        }
+    return {
+        "mode": "normal",
+        "size": base_size,
+        "base_size": base_size,
+        "size_policy": size_policy,
+        "module_count": len(modules),
+        "line_count": line_count,
+        "char_count": char_count,
+        "reasons": reasons,
+    }
 
 
 def detect_hidden_candidates(text: str) -> list[str]:
@@ -303,10 +999,18 @@ def filter_display_content(text: str) -> tuple[str, list[str]]:
     return display_text or text, sorted(set(excluded))
 
 
-def attach_confirmation_materials(rows: list[dict[str, Any]], template: dict[str, Any]) -> None:
+def attach_confirmation_materials(
+    rows: list[dict[str, Any]],
+    *,
+    default_template: dict[str, Any],
+    templates_by_brand_id: dict[str, dict[str, Any]],
+    base_size: str,
+    size_policy: str,
+) -> None:
     for row in rows:
         if row["status"] != "supported":
             continue
+        template = template_for_row(row, default_template=default_template, templates_by_brand_id=templates_by_brand_id)
         path = Path(str(row["path"]))
         try:
             text = read_text_guess(path)
@@ -314,6 +1018,12 @@ def attach_confirmation_materials(rows: list[dict[str, Any]], template: dict[str
             row["confirmation_error"] = str(exc)
             continue
         display_text, excluded = filter_display_content(text)
+        size_plan = poster_size_plan(
+            display_text=display_text,
+            template=template,
+            base_size=base_size,
+            size_policy=size_policy,
+        )
         row["confirmation"] = {
             "brand": row.get("brand", ""),
             "city": row.get("city", ""),
@@ -326,6 +1036,7 @@ def attach_confirmation_materials(rows: list[dict[str, Any]], template: dict[str
             "txt_line_count": len(text.splitlines()),
             "display_char_count": len(display_text),
             "detected_modules": detect_modules(display_text),
+            "poster_size_plan": size_plan,
             "hidden_candidates": excluded or detect_hidden_candidates(text),
             "txt_preview": text_preview(text),
         }
@@ -339,29 +1050,87 @@ def compile_prompt(
     txt_path: Path,
     txt_content: str,
     excluded_content: list[str] | None = None,
+    use_reference_images: bool = True,
+    asset_mode: str = DEFAULT_ASSET_MODE,
+    size_plan: dict[str, Any] | None = None,
     qr_retry_note: str | None = None,
 ) -> str:
     brand_name = str(brand.get("canonical_name"))
     style_notes = "\n".join(f"- {item}" for item in as_list(brand.get("style_notes")))
     retry_block = f"\n二维码上次验证失败，必须修正：{qr_retry_note}\n" if qr_retry_note else ""
+    plan = size_plan or {}
+    poster_size = str(plan.get("size") or "")
+    layout_mode = str(plan.get("mode") or "normal")
+    if layout_mode == "long":
+        content_layout_rules = (
+            f"画幅策略：内容偏多，本次使用长海报画幅 {poster_size}。"
+            "请纵向拉长海报，压缩顶部主视觉高度，扩展中部活动卡片区域；"
+            "不要为了塞内容把正文缩得过小，不要遗漏可展示活动模块；"
+            "底部卖点/扫码区固定在整张海报最底部。"
+        )
+    elif layout_mode == "fixed":
+        content_layout_rules = f"画幅策略：固定海报画幅 {poster_size or '9:16'}。即使内容偏多，也不要改变输出画幅。"
+    else:
+        content_layout_rules = f"画幅策略：常规海报画幅 {poster_size or '9:16'}。保持模板的常规竖版信息层级。"
+    layout_block = ""
+    mode_rules = REFERENCE_IMAGE_RULES
+    if asset_mode == ASSET_MODE_OVERLAY:
+        reference_block = (
+            "参考图输入顺序：\n"
+            "1. 模板示例图：只参考版式结构、模块顺序、留白、占位区和信息层级，不复制其中的旧内容。\n"
+        )
+        asset_rules = """Logo/二维码规则：
+- 不要生成品牌 Logo。
+- 不要生成二维码、假二维码、二维码纹理或扫码图案。
+- 请保留干净的 Logo 和扫码留白区域，不要保留模板示例图中的占位文字、占位图标或假二维码图案；最终 Logo 和二维码由脚本用真实品牌素材贴入。"""
+    elif asset_mode == ASSET_MODE_HYBRID:
+        reference_block = (
+            "参考图输入顺序：\n"
+            "1. 模板示例图：只参考版式结构、模块顺序、留白、占位区和信息层级，不复制其中的旧内容。\n"
+            "2. 品牌 Logo：必须来自这张真实 Logo 参考图，并自然融入顶部品牌区，不要使用模板旧 Logo 或重写成其他品牌。\n"
+        )
+        asset_rules = """Logo/二维码规则：
+- 品牌 Logo 来自第 2 张真实 Logo 参考图，作为海报品牌区的一部分自然生成，不要后贴感、不要变形、不要替换品牌字样。
+- 不要生成二维码、假二维码、二维码纹理、条形码或抽象扫码图案。
+- 底部扫码区保持干净蓝色或浅色背景即可，不要生成白底扫码卡片、扫码占位框、占位文字、占位二维码、二维码图案或复杂纹理；真实二维码卡片会由脚本贴入。"""
+    else:
+        reference_block = (
+            "参考图输入顺序：\n"
+            "1. 模板示例图：只参考版式结构、模块顺序、留白、占位区和信息层级，不复制其中的旧内容。\n"
+            "2. 品牌 Logo：必须来自这张真实 Logo 参考图，并自然融入顶部品牌区，不要使用模板旧 Logo 或重写成其他品牌。\n"
+            "3. 品牌二维码：必须来自这张真实二维码参考图，放入底部扫码区，保持正方形、清晰、完整、无遮挡、无透视、无裁切、可扫码。\n"
+        )
+        asset_rules = """Logo/二维码规则：
+- 品牌 Logo 来自第 2 张真实 Logo 参考图，作为海报品牌区的一部分自然生成，不要后贴感、不要变形、不要替换品牌字样。
+- 二维码来自第 3 张真实二维码参考图，必须保持正方形、清晰、完整、可扫码，不得重绘成假二维码、二维码纹理、条形码或抽象扫码图案。
+- 模板图中的旧 Logo、旧二维码、二维码占位、扫码占位文字都只是版式参考，不得原样保留。"""
+    if not use_reference_images:
+        reference_block = "生成模式：KIE text-to-image。本次不传任何模板参考图。\n"
+        layout_block = f"\n结构化版式说明：\n{template_layout_description(template)}\n"
+        mode_rules = TEXT_TO_IMAGE_RULES
+        asset_rules = """Logo/二维码规则：
+- text-to-image 模式没有真实 Logo 参考图，不得生成假二维码或伪扫码图案。
+- 如需正式成品，请关闭 --text-to-image，使用默认 hybrid 模式传入模板和 Logo 参考图，并由脚本贴入真实二维码。"""
     return f"""请生成一张竖版司机城市活动海报。
 
 输出目标：
 - 品牌：{brand_name}
 - 城市：{city}
 - 模板：{template['display_name']}（{template['template_id']}）
+- 目标画幅：{poster_size or '9:16'}
 - 活动 TXT 文件：{txt_path.name}
 
-参考图输入顺序：
-1. 模板示例图：只参考版式结构、模块顺序、留白和信息层级，不复制其中的旧内容。
-2. 品牌 Logo：必须使用真实 Logo，不要重绘或替换品牌字样。
-3. 品牌二维码：必须原样放入海报，保持可扫码。
+{reference_block}{layout_block}
+
+{asset_rules}
 
 品牌视觉要求：
 {style_notes}
 
 通用内容规则：
 {COMMON_POSTER_RULES}
+{mode_rules}
+{content_layout_rules}
 {retry_block}
 请从下面"可展示活动内容"中提取活动内容，并尽量覆盖其中所有模块。不要编造城市、日期、金额、奖励、门槛或活动规则。
 已排除内容：{"；".join(excluded_content or ["无"])}
@@ -394,17 +1163,23 @@ def markdown_summary(rows: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def print_dry_run(rows: list[dict[str, Any]], template: dict[str, Any]) -> None:
+def print_dry_run(
+    rows: list[dict[str, Any]],
+    *,
+    default_template: dict[str, Any],
+    templates_by_brand_id: dict[str, dict[str, Any]],
+) -> None:
     logger.info("DRY RUN: no image API will be called.")
-    logger.info("Selected template: %s (%s)", template["display_name"], template["template_id"])
+    logger.info("Selected default template: %s (%s)", default_template["display_name"], default_template["template_id"])
     print()
     for row in rows:
         if row["status"] == "supported":
+            template = template_for_row(row, default_template=default_template, templates_by_brand_id=templates_by_brand_id)
             sample = "sample=yes" if row.get("is_sample") else f"sample={row.get('sample_file')}"
             print(
                 f"SUPPORTED  {row['brand']}  {Path(row['path']).name}  "
                 f"city={row.get('city')} city_source={row.get('city_source')} keyword={row['matched_keyword']} "
-                f"output={row.get('output_name')} {sample}"
+                f"template={template['template_id']} output={row.get('output_name')} {sample}"
             )
         elif row["status"] == "ambiguous":
             matches = ", ".join(f"{item['brand']}({item['keyword']})" for item in row["matches"])
@@ -413,7 +1188,17 @@ def print_dry_run(rows: list[dict[str, Any]], template: dict[str, Any]) -> None:
             print(f"UNSUPPORTED  {Path(row['path']).name}  reason={row['reason']}")
     print()
     print("待用户确认清单：")
-    print(markdown_summary([{**row, "template": template["display_name"]} for row in rows]))
+    print(
+        markdown_summary(
+            [
+                {
+                    **row,
+                    "template": template_for_row(row, default_template=default_template, templates_by_brand_id=templates_by_brand_id)["display_name"],
+                }
+                for row in rows
+            ]
+        )
+    )
     print()
     print("确认材料（仅来自真实 TXT 文件，未调用图片 API）：")
     for row in rows:
@@ -434,6 +1219,17 @@ def print_dry_run(rows: list[dict[str, Any]], template: dict[str, Any]) -> None:
         print(f"- 城市来源：{confirmation.get('city_source')}")
         print(f"- 关键词命中模块：{modules}")
         print(f"- 排除候选关键词：{hidden}")
+        size_plan = confirmation.get("poster_size_plan") if isinstance(confirmation.get("poster_size_plan"), dict) else {}
+        reasons = "；".join(size_plan.get("reasons") or [])
+        reason_note = ""
+        if size_plan.get("mode") == SIZE_POLICY_FIXED and reasons:
+            reason_note = f"（已关闭自动拉长；内容达到长图阈值：{reasons}）"
+        elif reasons:
+            reason_note = f"（{reasons}）"
+        print(
+            f"- 海报画幅策略：{size_plan.get('mode', 'normal')} / {size_plan.get('size', '')}"
+            + reason_note
+        )
         print(
             f"- TXT 行数/字符数：{confirmation.get('txt_line_count')} 行 / "
             f"{confirmation.get('txt_char_count')} 字符；可展示内容 {confirmation.get('display_char_count')} 字符"
@@ -471,7 +1267,8 @@ def run_check(template_id: str | None = None) -> dict[str, Any]:
         errors.append(f"模板索引读取失败：{exc}")
 
     if not templates:
-        errors.append("templates.yaml 中没有可用模板。")
+        errors.append("assets/templates/templates.yaml 中没有可用模板。")
+    template_ids = {str(template.get("template_id") or "") for template in templates}
     for template in templates:
         template_path = resolve_path(template.get("example_path", ""), root)
         item = {
@@ -508,6 +1305,9 @@ def run_check(template_id: str | None = None) -> dict[str, Any]:
             brand_errors.append("canonical_name 为空")
         if not as_list(brand.get("filename_keywords")):
             brand_errors.append("filename_keywords 为空")
+        preferred_template_id = brand_preferred_template_id(brand)
+        if preferred_template_id and preferred_template_id not in template_ids:
+            brand_errors.append(f"preferred_template_id 不存在：{preferred_template_id}")
 
         assets = brand.get("assets", {})
         logo_path = resolve_path(str(assets.get("logo_path") or ""), root)
@@ -536,6 +1336,7 @@ def run_check(template_id: str | None = None) -> dict[str, Any]:
                 "config_path": brand.get("_config_path"),
                 "logo_path": str(logo_path),
                 "qr_path": str(qr_path),
+                "preferred_template_id": preferred_template_id,
                 "qr_ok": bool(qr_result and qr_result.get("ok")),
                 "errors": brand_errors,
             }
@@ -568,8 +1369,132 @@ def print_check(result: dict[str, Any]) -> None:
         print(f"- {brand['canonical_name']} ({brand['brand_id']}): {brand_status}")
         print(f"  logo={brand['logo_path']}")
         print(f"  qr={brand['qr_path']} qr_ok={brand['qr_ok']}")
+        if brand.get("preferred_template_id"):
+            print(f"  preferred_template={brand['preferred_template_id']}")
         for error in brand["errors"]:
             print(f"  error={error}")
+    if result["errors"]:
+        print()
+        print("Errors:")
+        for error in result["errors"]:
+            print(f"- {error}")
+
+
+def has_ratio_keys(config: Any, required: tuple[str, ...]) -> bool:
+    if not isinstance(config, dict):
+        return False
+    for key in required:
+        try:
+            float(config.get(key))
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
+def run_brand_locks_check() -> dict[str, Any]:
+    root = skill_root()
+    errors: list[str] = []
+    warnings: list[str] = []
+    details: dict[str, Any] = {"templates": [], "brands": []}
+    templates = load_templates(root)
+    template_ids = {str(template.get("template_id") or "") for template in templates}
+
+    for template in templates:
+        template_id = str(template.get("template_id") or "")
+        example_path = resolve_path(str(template.get("example_path") or ""), root)
+        template_errors: list[str] = []
+        template_warnings: list[str] = []
+        if not example_path.is_file():
+            template_errors.append(f"模板示例图不存在：{example_path}")
+        if not has_ratio_keys(template.get("qr_overlay"), ("x_ratio", "y_ratio", "size_ratio")):
+            template_errors.append("qr_overlay 缺少 x_ratio/y_ratio/size_ratio；默认 hybrid 模式需要用它贴入真实二维码。")
+        errors.extend(f"{template_id}: {item}" for item in template_errors)
+        warnings.extend(f"{template_id}: {item}" for item in template_warnings)
+        details["templates"].append(
+            {
+                "template_id": template_id,
+                "example_path": str(example_path),
+                "qr_overlay_configured": has_ratio_keys(template.get("qr_overlay"), ("x_ratio", "y_ratio", "size_ratio")),
+                "errors": template_errors,
+                "warnings": template_warnings,
+            }
+        )
+
+    brands = load_brands(root)
+    for brand in brands:
+        brand_id = str(brand.get("brand_id") or "")
+        canonical = str(brand.get("canonical_name") or brand_id)
+        brand_errors: list[str] = []
+        brand_warnings: list[str] = []
+        assets = brand.get("assets") if isinstance(brand.get("assets"), dict) else {}
+        logo_path = resolve_path(str(assets.get("logo_path") or ""), root)
+        qr_path = resolve_path(str(assets.get("qr_path") or ""), root)
+        if not logo_path.is_file():
+            brand_errors.append(f"logo 不存在：{logo_path}")
+        if not qr_path.is_file():
+            brand_errors.append(f"二维码不存在：{qr_path}")
+        if not has_ratio_keys(brand.get("logo_overlay"), ("x_ratio", "y_ratio", "width_ratio", "height_ratio")):
+            brand_warnings.append("logo_overlay 未配置；默认 hybrid 模式不需要，仅 legacy overlay 模式需要。")
+
+        preferred_template_id = brand_preferred_template_id(brand)
+        if not preferred_template_id:
+            brand_warnings.append("品牌尚未绑定 preferred_template_id，当前会使用默认模板。")
+        elif preferred_template_id not in template_ids:
+            brand_errors.append(f"preferred_template_id 不存在：{preferred_template_id}")
+
+        qr_result: dict[str, Any] | None = None
+        if qr_path.is_file():
+            qr_result = verify_qr(canonical, qr_path, brands=brands)
+            if not qr_result.get("ok"):
+                brand_errors.append("源二维码自检失败：" + str(qr_result.get("message") or qr_result.get("error") or "unknown error"))
+
+        errors.extend(f"{canonical}: {item}" for item in brand_errors)
+        warnings.extend(f"{canonical}: {item}" for item in brand_warnings)
+        details["brands"].append(
+            {
+                "brand_id": brand_id,
+                "canonical_name": canonical,
+                "preferred_template_id": preferred_template_id,
+                "logo_path": str(logo_path),
+                "qr_path": str(qr_path),
+                "logo_overlay_configured": has_ratio_keys(brand.get("logo_overlay"), ("x_ratio", "y_ratio", "width_ratio", "height_ratio")),
+                "qr_ok": bool(qr_result and qr_result.get("ok")),
+                "errors": brand_errors,
+                "warnings": brand_warnings,
+            }
+        )
+
+    return {"ok": not errors, "errors": errors, "warnings": warnings, "details": details}
+
+
+def print_brand_locks_check(result: dict[str, Any]) -> None:
+    status = "OK" if result["ok"] else "FAIL"
+    print(f"{status}: lx-haibao brand locks")
+    print()
+    print("Templates:")
+    for template in result["details"]["templates"]:
+        qr_status = "OK" if template["qr_overlay_configured"] else "FAIL"
+        print(f"- {template['template_id']}: qr_overlay={qr_status} example={template['example_path']}")
+        for error in template["errors"]:
+            print(f"  error={error}")
+        for warning in template.get("warnings", []):
+            print(f"  warning={warning}")
+    print()
+    print("Brands:")
+    for brand in result["details"]["brands"]:
+        preferred = brand.get("preferred_template_id") or "(unbound)"
+        logo_status = "OK" if brand["logo_overlay_configured"] else "optional-missing"
+        qr_status = "OK" if brand["qr_ok"] else "FAIL"
+        print(f"- {brand['canonical_name']} ({brand['brand_id']}): template={preferred} logo_overlay_legacy={logo_status} qr={qr_status}")
+        for warning in brand["warnings"]:
+            print(f"  warning={warning}")
+        for error in brand["errors"]:
+            print(f"  error={error}")
+    if result["warnings"]:
+        print()
+        print("Warnings:")
+        for warning in result["warnings"]:
+            print(f"- {warning}")
     if result["errors"]:
         print()
         print("Errors:")
@@ -624,6 +1549,22 @@ def save_metadata(meta_dir: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
+def enrich_imagegen_request(api_result: dict[str, Any], extra: dict[str, Any]) -> str:
+    request_path_value = api_result.get("imagegen_request_path")
+    if not request_path_value:
+        return ""
+    request_path = Path(str(request_path_value))
+    if not request_path.is_file():
+        return str(request_path)
+    try:
+        payload = json.loads(request_path.read_text(encoding="utf-8"))
+    except ValueError:
+        payload = {}
+    payload.update(extra)
+    request_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(request_path)
+
+
 def generate_one(
     *,
     row: dict[str, Any],
@@ -635,7 +1576,11 @@ def generate_one(
     sample_only: bool,
     max_retries: int,
     size: str,
+    size_policy: str,
     resolution: str,
+    use_reference_images: bool = True,
+    asset_mode: str = DEFAULT_ASSET_MODE,
+    skip_providers: list[str] | None = None,
     skip_qr: bool = False,
     brands: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -644,6 +1589,13 @@ def generate_one(
     txt_path = Path(str(row["path"]))
     txt_content = read_text_guess(txt_path)
     display_content, excluded_content = filter_display_content(txt_content)
+    size_plan = poster_size_plan(
+        display_text=display_content,
+        template=template,
+        base_size=size,
+        size_policy=size_policy,
+    )
+    request_size = str(size_plan.get("size") or size)
     city, city_source = resolve_city(txt_path, brand, txt_content=txt_content)
     if row.get("city"):
         city = str(row["city"])
@@ -654,18 +1606,19 @@ def generate_one(
     if sample_only:
         output_name = output_name.replace(".png", "-sample.png")
     final_path = output_dir / output_name
-    refs = reference_paths(brand, template)
+    refs = reference_paths(brand, template, use_reference_images=use_reference_images, asset_mode=asset_mode)
 
-    qr_retry_note: str | None = None
     last_failure = ""
-    qr_failed_providers: list[str] = []
+    qr_retry_note: str | None = None
     for attempt in range(max_retries + 1):
         logger.info(
-            "开始生成海报：品牌=%s 城市=%s 城市来源=%s TXT=%s 尝试=%d/%d",
+            "开始生成海报：品牌=%s 城市=%s 城市来源=%s TXT=%s 模式=%s asset_mode=%s 尝试=%d/%d",
             brand["canonical_name"],
             city,
             city_source,
             txt_path.name,
+            "image-to-image" if use_reference_images else "text-to-image",
+            asset_mode,
             attempt + 1,
             max_retries + 1,
         )
@@ -676,6 +1629,9 @@ def generate_one(
             txt_path=txt_path,
             txt_content=display_content,
             excluded_content=excluded_content,
+            use_reference_images=use_reference_images,
+            asset_mode=asset_mode,
+            size_plan=size_plan,
             qr_retry_note=qr_retry_note,
         )
         tmp_path = tmp_dir / f"{safe_filename(brand['brand_id'])}_{safe_filename(city)}_{attempt + 1}.png"
@@ -684,11 +1640,96 @@ def generate_one(
                 prompt=prompt,
                 reference_images=refs,
                 output_path=tmp_path,
-                size=size,
+                size=request_size,
                 resolution=resolution,
-                skip_providers=qr_failed_providers,
+                skip_providers=skip_providers,
             )
-            if skip_qr:
+            if api_result.get("status") == "agent_handoff":
+                request_path = enrich_imagegen_request(
+                    api_result,
+                    {
+                        "txt_file": str(txt_path),
+                        "brand": brand["canonical_name"],
+                        "city": city,
+                        "city_source": city_source,
+                        "template": template,
+                        "attempt": attempt + 1,
+                        "asset_mode": asset_mode,
+                        "size_plan": size_plan,
+                        "request_size": request_size,
+                        "display_content": display_content,
+                        "excluded_content": excluded_content,
+                        "final_path": str(final_path),
+                    },
+                )
+                meta_path = save_metadata(
+                    meta_dir,
+                    {
+                        "txt_file": str(txt_path),
+                        "brand": brand["canonical_name"],
+                        "city": city,
+                        "city_source": city_source,
+                        "template": template,
+                        "attempt": attempt + 1,
+                        "asset_mode": asset_mode,
+                        "size_plan": size_plan,
+                        "request_size": request_size,
+                        "display_content": display_content,
+                        "excluded_content": excluded_content,
+                        "prompt": prompt,
+                        "reference_images": [str(path) for path in refs],
+                        "reference_image_order": ["template_example", "brand_logo", "brand_qr"][: len(refs)],
+                        "api_result": api_result,
+                        "qr_result": {"ok": False, "message": "等待 Codex 内置 image_gen 生图后验证。"},
+                        "final_path": str(final_path),
+                        "imagegen_request_path": request_path,
+                    },
+                )
+                return {
+                    **row,
+                    "template": template["display_name"],
+                    "output_path": str(final_path),
+                    "qr_validation": "待验证",
+                    "run_status": "等待内置 image_gen",
+                    "failure_reason": f"外部图片 API 已回退到内置 image_gen；请求材料：{request_path}",
+                    "metadata_path": str(meta_path),
+                    "imagegen_request_path": request_path,
+                }
+            postprocess_result: dict[str, Any] = {
+                "mode": asset_mode,
+                "applied": False,
+                "ok": True,
+                "message": "not_used_in_integrated_mode",
+            }
+            if asset_mode == ASSET_MODE_OVERLAY:
+                postprocess_result = apply_deterministic_assets(tmp_path, brand, template)
+                if not postprocess_result.get("ok"):
+                    qr_result = {
+                        "ok": False,
+                        "brand": brand["canonical_name"],
+                        "message": "Logo/二维码后处理失败。",
+                        "postprocess_result": postprocess_result,
+                    }
+                elif skip_qr:
+                    qr_result = {"ok": True, "brand": brand["canonical_name"], "skipped": True, "message": "QR validation skipped (--skip-qr)."}
+                else:
+                    # 传入 brands 避免每次验证都重新加载
+                    qr_result = verify_qr(str(brand["canonical_name"]), tmp_path, brands=brands)
+            elif asset_mode == ASSET_MODE_HYBRID:
+                postprocess_result = apply_hybrid_assets(tmp_path, brand, template)
+                if not postprocess_result.get("ok"):
+                    qr_result = {
+                        "ok": False,
+                        "brand": brand["canonical_name"],
+                        "message": "二维码后处理失败。",
+                        "postprocess_result": postprocess_result,
+                    }
+                elif skip_qr:
+                    qr_result = {"ok": True, "brand": brand["canonical_name"], "skipped": True, "message": "QR validation skipped (--skip-qr)."}
+                else:
+                    # 传入 brands 避免每次验证都重新加载
+                    qr_result = verify_qr(str(brand["canonical_name"]), tmp_path, brands=brands)
+            elif skip_qr:
                 qr_result = {"ok": True, "brand": brand["canonical_name"], "skipped": True, "message": "QR validation skipped (--skip-qr)."}
             else:
                 # 传入 brands 避免每次验证都重新加载
@@ -702,11 +1743,16 @@ def generate_one(
                     "city_source": city_source,
                     "template": template,
                     "attempt": attempt + 1,
+                    "asset_mode": asset_mode,
+                    "size_plan": size_plan,
+                    "request_size": request_size,
                     "display_content": display_content,
                     "excluded_content": excluded_content,
                     "prompt": prompt,
                     "reference_images": [str(path) for path in refs],
+                    "reference_image_order": ["template_example", "brand_logo", "brand_qr"][: len(refs)],
                     "api_result": api_result,
+                    "postprocess_result": postprocess_result,
                     "qr_result": qr_result,
                     "final_path": str(final_path),
                 },
@@ -725,17 +1771,31 @@ def generate_one(
                     "failure_reason": "",
                     "metadata_path": str(meta_path),
                 }
-            last_failure = str(qr_result.get("message") or qr_result.get("error") or "二维码验证失败")
-            provider_name = str(api_result.get("provider") or "")
-            if provider_name and provider_name not in qr_failed_providers:
-                qr_failed_providers.append(provider_name)
-            qr_retry_note = last_failure + "。请确保第三张参考图中的二维码被完整、清晰、无变形地放入海报。"
+            if not postprocess_result.get("ok"):
+                if asset_mode == ASSET_MODE_OVERLAY:
+                    last_failure = "Logo/二维码后处理失败：" + json.dumps(postprocess_result, ensure_ascii=False)
+                elif asset_mode == ASSET_MODE_HYBRID:
+                    last_failure = "二维码后处理失败：" + json.dumps(postprocess_result, ensure_ascii=False)
+                else:
+                    last_failure = str(qr_result.get("message") or qr_result.get("error") or "二维码验证失败")
+            else:
+                last_failure = str(qr_result.get("message") or qr_result.get("error") or "二维码验证失败")
+            if asset_mode == ASSET_MODE_INTEGRATED:
+                qr_retry_note = (
+                    last_failure
+                    + "。请确保第 2 张真实 Logo 参考图自然融入品牌区，第 3 张真实二维码参考图完整、清晰、无变形地放入扫码区。"
+                )
+            elif asset_mode == ASSET_MODE_HYBRID:
+                qr_retry_note = last_failure + "。请确保第 2 张真实 Logo 参考图自然融入品牌区，并保持底部扫码卡片干净、规则、无假二维码图案，便于脚本贴入真实二维码。"
+            else:
+                qr_retry_note = last_failure + "。请保持模板中的 Logo 和扫码区域干净，便于旧版 overlay 后处理贴入真实素材。"
             logger.warning(
-                "品牌 %s 城市 %s 第 %d 次尝试 QR 验证失败：provider=%s error=%s",
+                "品牌 %s 城市 %s 第 %d 次尝试资产/QR 验证失败：provider=%s asset_mode=%s error=%s",
                 brand["canonical_name"],
                 city,
                 attempt + 1,
-                provider_name or "-",
+                str(api_result.get("provider") or "") or "-",
+                asset_mode,
                 last_failure,
             )
             if tmp_path.exists():
@@ -759,19 +1819,19 @@ def generate_one(
 
 def main() -> int:
     # 配置 logging：控制台输出 + 文件日志
-    log_dir = skill_root() / "output" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    run_log_dir = log_dir()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(sys.stderr),
-            logging.FileHandler(log_dir / f"{datetime.now().strftime('%Y%m%d')}.log", encoding="utf-8"),
+            logging.FileHandler(run_log_dir / f"{datetime.now().strftime('%Y%m%d')}.log", encoding="utf-8"),
         ],
     )
 
     parser = argparse.ArgumentParser(description="WorkBuddy poster batch generator using configured image providers.")
     parser.add_argument("--check", action="store_true", help="Validate dependencies, brand assets, templates, and source QR codes without generating images.")
+    parser.add_argument("--check-brand-locks", action="store_true", help="Check brand-template bindings, source assets, source QR decoding, and optional legacy overlay coordinates.")
     parser.add_argument("--check-providers", action="store_true", help="Check image provider config and base_url connectivity without generating images.")
     parser.add_argument("--smoke-provider", help="Run one real minimal image generation call for a provider. Requires --confirmed and may incur API cost.")
     parser.add_argument("--smoke-output-dir", help="Directory for --smoke-provider output image.")
@@ -783,11 +1843,26 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Route files and preview confirmation table without calling image API.")
     parser.add_argument("--confirmed", action="store_true", help="Required for sample or final image generation after the user confirms dry-run content.")
     parser.add_argument("--sample-only", action="store_true", help="Generate only the first routed TXT per brand.")
-    parser.add_argument("--template", help="Template id from templates.yaml. Defaults to the first template.")
+    parser.add_argument("--template", help="Template id from assets/templates/templates.yaml. Admin override only; defaults to brand binding or first template.")
+    parser.add_argument("--admin-template-override", action="store_true", help="Allow --template to override brand template locks for admin testing.")
+    parser.add_argument("--text-to-image", action="store_true", help="Do not pass template images to the provider; use structured layout prompt only.")
+    parser.add_argument(
+        "--asset-mode",
+        choices=[ASSET_MODE_HYBRID, ASSET_MODE_INTEGRATED, ASSET_MODE_OVERLAY],
+        default=DEFAULT_ASSET_MODE,
+        help="Logo/QR handling mode. hybrid passes template+logo to the model and overlays real QR; integrated passes template+logo+QR to the model; overlay uses the legacy deterministic postprocess path.",
+    )
+    parser.add_argument("--skip-provider", action="append", default=[], help="Skip a configured image provider. Can be repeated.")
     parser.add_argument("--city", help="Override city name for all input TXT files. Default: parse from TXT content, then filename.")
     parser.add_argument("--output-dir", help="Override poster output directory.")
-    parser.add_argument("--size", default=os.environ.get("POSTER_IMAGE_SIZE", "9:16"), help="Business size/aspect value. Seedream maps 9:16 to a 2K portrait pixel size by default.")
-    parser.add_argument("--resolution", default=os.environ.get("POSTER_IMAGE_RESOLUTION", "2k"), help="APIMart resolution value; Seedream uses it only when --size is a resolution value.")
+    parser.add_argument("--size", default=os.environ.get("POSTER_IMAGE_SIZE", "9:16"), help="Business size/aspect value for the configured image providers.")
+    parser.add_argument(
+        "--size-policy",
+        choices=[SIZE_POLICY_AUTO, SIZE_POLICY_FIXED],
+        default=os.environ.get("POSTER_SIZE_POLICY", DEFAULT_SIZE_POLICY),
+        help="Poster size policy. auto keeps normal content at --size and switches content-heavy posters to the template long_size; fixed always uses --size.",
+    )
+    parser.add_argument("--resolution", default=os.environ.get("POSTER_IMAGE_RESOLUTION", "2k"), help="Resolution value for providers that support it.")
     parser.add_argument("--max-retries", type=int, default=2, help="QR failure retries per poster.")
     parser.add_argument("--skip-qr", action="store_true", help="Skip QR code validation (for environments without zxingcpp).")
     parser.add_argument("--workers", type=int, default=1, help="Parallel workers for brand generation (default: 1, sequential).")
@@ -800,6 +1875,14 @@ def main() -> int:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:
             print_check(result)
+        return 0 if result["ok"] else 1
+
+    if args.check_brand_locks:
+        result = run_brand_locks_check()
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print_brand_locks_check(result)
         return 0 if result["ok"] else 1
 
     if args.check_providers:
@@ -818,7 +1901,11 @@ def main() -> int:
             return 2
         from image2_client import smoke_test_provider
 
-        smoke_dir = Path(args.smoke_output_dir).expanduser().resolve() if args.smoke_output_dir else skill_root() / "output" / "provider-smoke"
+        smoke_dir = (
+            Path(args.smoke_output_dir).expanduser().resolve()
+            if args.smoke_output_dir
+            else resolve_fog_path(DEFAULT_PROVIDER_SMOKE_DIR, Path(__file__)).resolve()
+        )
         smoke_dir.mkdir(parents=True, exist_ok=True)
         provider_name = str(args.smoke_provider).strip().lower()
         output_path = smoke_dir / f"{safe_filename(provider_name)}-{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
@@ -841,6 +1928,14 @@ def main() -> int:
             print_smoke_result(result)
         return 0
 
+    if args.template and not args.admin_template_override:
+        logger.error("--template 是管理员覆盖能力；如确需临时覆盖品牌模板，请追加 --admin-template-override。")
+        return 2
+
+    if args.text_to_image and args.asset_mode in {ASSET_MODE_HYBRID, ASSET_MODE_INTEGRATED}:
+        logger.error("--text-to-image 不传真实 Logo/二维码参考图，不能使用 hybrid/integrated 资产模式；请去掉 --text-to-image，或显式使用 --asset-mode overlay 做旧版后处理。")
+        return 2
+
     paths = collect_input_paths(args)
     if not paths:
         logger.error("未提供输入文件，请使用 --file 或 --dir")
@@ -851,16 +1946,49 @@ def main() -> int:
         return 1
 
     brands = load_brands(skill_root())
-    template = select_template(args.template)
+    default_template = select_template(args.template)
     rows = build_rows(paths, brands, city_override=args.city)
     brands_by_id = {str(brand["brand_id"]): brand for brand in brands}
+    try:
+        templates_by_brand_id = {
+            str(brand["brand_id"]): select_template_for_brand(
+                brand,
+                forced_template_id=args.template,
+                default_template=default_template,
+            )
+            for brand in brands
+        }
+    except RuntimeError as exc:
+        logger.error("%s", exc)
+        return 1
 
     if args.dry_run:
-        attach_confirmation_materials(rows, template)
+        attach_confirmation_materials(
+            rows,
+            default_template=default_template,
+            templates_by_brand_id=templates_by_brand_id,
+            base_size=args.size,
+            size_policy=args.size_policy,
+        )
         if args.json:
-            print(json.dumps({"dry_run": True, "template": template, "routes": rows}, ensure_ascii=False, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "dry_run": True,
+                        "template": default_template,
+                        "templates_by_brand_id": templates_by_brand_id,
+                        "routes": rows,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
         else:
-            print_dry_run(rows, template)
+            print_dry_run(
+                rows,
+                default_template=default_template,
+                templates_by_brand_id=templates_by_brand_id,
+            )
         return 0
 
     if not args.confirmed:
@@ -906,10 +2034,11 @@ def main() -> int:
             )
             continue
         if args.sample_only and not row.get("is_sample"):
+            row_template = template_for_row(row, default_template=default_template, templates_by_brand_id=templates_by_brand_id)
             skip_rows.append(
                 {
                     **row,
-                    "template": template["display_name"],
+                    "template": row_template["display_name"],
                     "output_path": "",
                     "qr_validation": "",
                     "run_status": "跳过",
@@ -929,31 +2058,36 @@ def main() -> int:
             futures = {}
             for row in gen_rows:
                 brand = brands_by_id[str(row["brand_id"])]
+                row_template = template_for_row(row, default_template=default_template, templates_by_brand_id=templates_by_brand_id)
                 future = pool.submit(
                     generate_one,
                     row=row,
                     brand=brand,
-                    template=template,
+                    template=row_template,
                     output_dir=output_dir,
                     meta_dir=meta_dir,
                     tmp_dir=tmp_dir,
                     sample_only=args.sample_only,
                     max_retries=args.max_retries,
                     size=args.size,
+                    size_policy=args.size_policy,
                     resolution=args.resolution,
+                    use_reference_images=not args.text_to_image,
+                    asset_mode=args.asset_mode,
+                    skip_providers=args.skip_provider,
                     skip_qr=args.skip_qr,
                     brands=brands,
                 )
-                futures[future] = row
+                futures[future] = (row, row_template)
             for future in as_completed(futures):
                 try:
                     results.append(future.result())
                 except Exception as exc:  # noqa: BLE001 - don't let one failure kill the batch.
-                    row = futures[future]
+                    row, row_template = futures[future]
                     logger.error("并行生成异常：%s", exc)
                     results.append({
                         **row,
-                        "template": template["display_name"],
+                        "template": row_template["display_name"],
                         "output_path": "",
                         "qr_validation": "",
                         "run_status": "失败",
@@ -962,28 +2096,45 @@ def main() -> int:
     else:
         for row in gen_rows:
             brand = brands_by_id[str(row["brand_id"])]
+            row_template = template_for_row(row, default_template=default_template, templates_by_brand_id=templates_by_brand_id)
             results.append(
                 generate_one(
                     row=row,
                     brand=brand,
-                    template=template,
+                    template=row_template,
                     output_dir=output_dir,
                     meta_dir=meta_dir,
                     tmp_dir=tmp_dir,
                     sample_only=args.sample_only,
                     max_retries=args.max_retries,
                     size=args.size,
+                    size_policy=args.size_policy,
                     resolution=args.resolution,
+                    use_reference_images=not args.text_to_image,
+                    asset_mode=args.asset_mode,
+                    skip_providers=args.skip_provider,
                     skip_qr=args.skip_qr,
                     brands=brands,
                 )
             )
 
     if args.json:
-        print(json.dumps({"dry_run": False, "template": template, "results": results}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "dry_run": False,
+                    "template": default_template,
+                    "templates_by_brand_id": templates_by_brand_id,
+                    "results": results,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
         print(markdown_summary(results))
-    return 1 if any(row.get("run_status") == "失败" for row in results) else 0
+    incomplete_statuses = {"失败", "等待内置 image_gen"}
+    return 1 if any(row.get("run_status") in incomplete_statuses for row in results) else 0
 
 
 if __name__ == "__main__":

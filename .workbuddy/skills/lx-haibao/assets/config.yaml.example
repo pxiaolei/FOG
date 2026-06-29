@@ -3,9 +3,19 @@
 # config.yaml 是个人真实配置，不要发到群里，也不要打进分享包。
 
 image_api:
-  providers: ["aihubmix", "apimart", "volcengine_seedream"]
-  provider_primary: "aihubmix"
-  provider_fallback: "apimart"
+  providers: ["kie", "aihubmix", "apimart"]
+  provider_primary: "kie"
+  provider_fallback: "aihubmix"
+
+  kie:
+    api_key: ""
+    base_url: "https://api.kie.ai"
+    upload_base_url: "https://kieai.redpandaai.co"
+    text_model: "gpt-image-2-text-to-image"
+    image_model: "gpt-image-2-image-to-image"
+    aspect_ratio: "auto"
+    upload_path: "images/lx-haibao"
+    callback_url: ""
 
   aihubmix:
     api_key: ""
@@ -17,15 +27,6 @@ image_api:
     output_format: "png"
     stream: false
     partial_images: 2
-
-  volcengine_seedream:
-    api_key: ""
-    base_url: "https://ark.cn-beijing.volces.com/api/v3"
-    model: "doubao-seedream-5-0-260128"
-    size: "1600x2848"
-    response_format: "url"
-    output_format: "png"
-    watermark: false
 
   apimart:
     api_key: ""

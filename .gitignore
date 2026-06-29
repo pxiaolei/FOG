@@ -7,6 +7,7 @@ config/fog_config.yaml.bak
 config/personal_config.yaml
 config/personal_config.yaml.bak
 config/database.yaml
+config/rds.md
 config/码表/
 
 # 不分享的 Skill
@@ -129,6 +130,8 @@ workspace/1*/
 !workspace/09端外海报图/元数据/.gitkeep
 !workspace/09端外海报图/产出图/
 !workspace/09端外海报图/产出图/.gitkeep
+!workspace/09端外海报图/处理日志/
+!workspace/09端外海报图/处理日志/.gitkeep
 !workspace/10表格同步/
 !workspace/10表格同步/.gitkeep
 !workspace/10表格同步/待处理/

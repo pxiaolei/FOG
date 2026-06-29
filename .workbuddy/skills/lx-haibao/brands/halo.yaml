@@ -7,6 +7,23 @@ assets:
   logo_path: "${SKILL_ROOT}/brand-assets/halo/logo.png"
   qr_path: "${SKILL_ROOT}/brand-assets/halo/qr.png"
 
+template:
+  preferred_template_id: "template02"
+
+logo_overlay:
+  mode: "draw_logo_lockup"
+  text: "哈啰"
+  wordmark_text: "哈啰"
+  font_path: "/System/Library/Fonts/STHeiti Medium.ttc"
+  icon_fill: "#078DFF"
+  icon_text_color: "#FFFFFF"
+  wordmark_color: "#111111"
+  x_ratio: 0.035
+  y_ratio: 0.022
+  width_ratio: 0.24
+  height_ratio: 0.055
+  padding_ratio: 0.0
+
 display:
   poster_brand_name: "哈啰"
   forbidden_brand_text: ["哈啰轻快"]

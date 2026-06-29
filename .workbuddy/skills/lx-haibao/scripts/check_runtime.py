@@ -13,7 +13,7 @@ from typing import Sequence
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_ROOT = SCRIPT_DIR.parent
 DEFAULT_VENV_DIR = SKILL_ROOT / ".venv"
-REQUIREMENTS_PATH = SKILL_ROOT / "requirements.txt"
+REQUIREMENTS_PATH = SKILL_ROOT / "assets" / "runtime" / "requirements.txt"
 RUN_POSTER_BATCH = SCRIPT_DIR / "run_poster_batch.py"
 REQUIRED_IMPORTS = {
     "requests": "requests",
@@ -102,12 +102,21 @@ def check_skill(python: Path) -> bool:
     return result.returncode == 0
 
 
-def print_next_commands(python: Path) -> None:
+def check_runtime_launcher() -> str:
+    return r".\check_runtime.cmd" if os.name == "nt" else "./check_runtime.sh"
+
+
+def haibao_launcher() -> str:
+    return r".\haibao.cmd" if os.name == "nt" else "./haibao.sh"
+
+
+def print_next_commands() -> None:
+    runner = haibao_launcher()
     print()
-    print("后续请使用这个 venv Python 运行 lx-haibao，不要给全局 Python 安装依赖：")
-    print(f"- check: {command_text([str(python), str(RUN_POSTER_BATCH), '--check'])}")
-    print(f"- dry-run: {command_text([str(python), str(RUN_POSTER_BATCH), '--dry-run', '--file', '<活动TXT路径>'])}")
-    print(f"- confirmed: {command_text([str(python), str(RUN_POSTER_BATCH), '--confirmed', '--file', '<活动TXT路径>'])}")
+    print("后续请在 lx-haibao 目录使用平台入口脚本运行，不要给全局 Python 安装依赖：")
+    print(f"- check: {runner} --check")
+    print(f"- dry-run: {runner} --dry-run --file <活动TXT路径>")
+    print(f"- confirmed: {runner} --confirmed --file <活动TXT路径>")
 
 
 def parse_args() -> argparse.Namespace:
@@ -145,7 +154,7 @@ def main() -> int:
         elif not runtime_python.is_file():
             print(f"FAIL: 未找到 venv Python: {runtime_python}")
             print("请先运行：")
-            print(f"  {command_text([str(bootstrap_python), str(Path(__file__).resolve()), '--install'])}")
+            print(f"  {check_runtime_launcher()} --install")
             return 1
 
         if not runtime_python.is_file():
@@ -162,7 +171,7 @@ def main() -> int:
 
         print()
         print("OK: lx-haibao 本地运行时可用。")
-        print_next_commands(runtime_python)
+        print_next_commands()
         return 0
     except RuntimeError as exc:
         print()

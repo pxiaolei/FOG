@@ -2,7 +2,7 @@
 
 ## 1. 数据表结构
 
-### hhdata.fact_daily_metrics（每日指标汇总表）
+### hhdata__fact_daily_metrics（每日指标汇总表）
 
 来源：精简汇总数据，由上游内部入库流程写入。
 

@@ -1,9 +1,11 @@
 """
 数据加载模块
 
-从 hhdata.fact_daily_metrics 查询指定运营主体/对接人的原始数据，
+从 hhdata__fact_daily_metrics 查询指定运营主体/对接人的原始数据，
 结合码表过滤，返回三天（当日、昨日、上周同日）的原始 DataFrame。
 """
+
+from __future__ import annotations
 
 import sys
 from datetime import datetime, timedelta
@@ -73,17 +75,18 @@ def _build_sql(brand_city_pairs: list, dates: List[str]) -> tuple:
         pair_clauses.append("(b.brand_name = %s AND c.city_name = %s)")
 
     sql = f"""
-        SELECT f.date, f.city_id, c.city_name, f.brand_id, b.brand_name,
-               f.placed_orders, f.completed_orders, f.online_drivers,
-               f.online_duration_hours, f.first_completed_drivers, f.gmv,
+        SELECT f.date_day AS date, f.city_id, c.city_name, f.brand_id, b.brand_name,
+               f.passenger_order_count, f.completed_order_count, f.online_driver_count,
+               f.online_duration_hour, f.first_completion_driver_count, f.gmv,
                f.merchant_b_subsidy, f.brand_commission, f.card_merchant_income,
-               f.completed_drivers, f.cancelled_by_driver, f.answered_orders
-        FROM hhdata.fact_daily_metrics f
-        JOIN mabiao.dim_cities c ON f.city_id = c.city_id
-        JOIN mabiao.dim_brands b ON f.brand_id = b.brand_id
-        WHERE f.date IN ({date_ph})
+               f.completed_drivers, f.cancelled_by_driver, f.cancelled_by_passenger,
+               f.cancelled_before_answer, f.response_count, f.match_count, f.total_commission
+        FROM hhdata__fact_daily_metrics f
+        JOIN mabiao__dim_cities c ON f.city_id = c.city_id
+        JOIN mabiao__dim_brands b ON f.brand_id = b.brand_id
+        WHERE f.date_day IN ({date_ph})
           AND ({" OR ".join(pair_clauses)})
-        ORDER BY b.brand_name, c.city_name, f.date
+        ORDER BY b.brand_name, c.city_name, f.date_day
     """
     # 参数顺序：dates, then (brand, city) pairs flattened
     params = list(dates)
@@ -196,16 +199,17 @@ def load_city_benchmark_data(
     city_placeholders = ", ".join(["%s"] * len(cities))
 
     sql = f"""
-        SELECT f.date, c.city_name,
-               f.placed_orders, f.completed_orders, f.online_drivers,
-               f.online_duration_hours, f.first_completed_drivers, f.gmv,
+        SELECT f.date_day AS date, c.city_name,
+               f.passenger_order_count, f.completed_order_count, f.online_driver_count,
+               f.online_duration_hour, f.first_completion_driver_count, f.gmv,
                f.merchant_b_subsidy, f.brand_commission, f.card_merchant_income,
-               f.completed_drivers, f.cancelled_by_driver, f.answered_orders
-        FROM hhdata.fact_daily_metrics f
-        JOIN mabiao.dim_cities c ON f.city_id = c.city_id
-        WHERE f.date IN ({placeholders})
+               f.completed_drivers, f.cancelled_by_driver, f.cancelled_by_passenger,
+               f.cancelled_before_answer, f.response_count, f.match_count, f.total_commission
+        FROM hhdata__fact_daily_metrics f
+        JOIN mabiao__dim_cities c ON f.city_id = c.city_id
+        WHERE f.date_day IN ({placeholders})
           AND c.city_name IN ({city_placeholders})
-        ORDER BY c.city_name, f.date
+        ORDER BY c.city_name, f.date_day
     """
     params = dates + cities
     return db.execute(sql, params)

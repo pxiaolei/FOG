@@ -47,7 +47,7 @@ from config import (
 )
 
 DAILY_REPORT_TITLE_SUFFIX = DEFAULT_REPORT_TITLE_SUFFIX
-DECIMAL_VOLUME_METRICS = {"tph", "unit_price", "avg_orders_per_driver", "online_duration_hours"}
+DECIMAL_VOLUME_METRICS = {"tph", "unit_price", "avg_orders_per_driver", "online_duration_hour"}
 
 
 def _build_spreadsheet_title(operator_name: str) -> str:

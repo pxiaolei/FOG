@@ -31,37 +31,26 @@ enabled_skills:
   lx_dapanribao: true
   lx_nongfu: true
   lx_biaogetongbu: true
-  lx_celuehuodong: true
-  lx_yuedufandian: true
+  lx_tongzhi: true
+  lx_hhbbu: true
+  lx_zhoubao: true
 
 # ============================================================
 # database
-# 要配置什么：共享能力可选使用的 PostgreSQL 连接信息。
+# 要配置什么：共享能力可选使用的 MySQL RDS 连接信息。
 # 说明：没有数据库权限可保持空值；内部写库配置优先放 personal_config.yaml。
 # ============================================================
 database:
+  driver: "mysql"
   host: ""
-  port: 5432
+  port: 3306
   database: ""
   user: ""
   password: ""
-  sslmode: ""
+  charset: "utf8mb4"
   connect_timeout: 10
-
-# ============================================================
-# lx_yuedufandian
-# 要配置什么：月度返点计算默认工作目录、对接人和排除主体。
-# 说明：当月具体口径写入 rules.yaml；源 Excel 先入库，本地 PostgreSQL 是默认计算源。
-# ============================================================
-lx_yuedufandian:
-  work_root: "workspace/13月度返点计算"
-  default_contacts: []
-  exclude_operators:
-    - "LX"
-  require_rules_yaml: true
-  sync_db:
-    enabled: false
-    require_confirmed: true
+  read_timeout: 300
+  write_timeout: 300
 
 # ============================================================
 # lx_shujuku
@@ -110,16 +99,26 @@ lx_zhutichaibiao:
 # ============================================================
 # lx_haibao
 # 要配置什么：端外海报输出目录和图片生成 API Key。
-# 从哪里获取：AIHubMix、火山方舟或 APIMart 控制台。
+# 从哪里获取：KIE、AIHubMix 或 APIMart 控制台。维护者在 Codex 环境中可在个人真实配置里追加 builtin_image_gen 兜底；同事共享默认不依赖 Codex。
 # ============================================================
 lx_haibao:
   output_dir: "workspace/09端外海报图/产出图"
   meta_dir: "workspace/09端外海报图/元数据"
   tmp_dir: "workspace/09端外海报图/临时图"
+  log_dir: "workspace/09端外海报图/处理日志"
   image_api:
-    providers: ["aihubmix", "apimart", "volcengine_seedream"]
-    provider_primary: "aihubmix"
-    provider_fallback: "apimart"
+    providers: ["kie", "aihubmix", "apimart"]
+    provider_primary: "kie"
+    provider_fallback: "aihubmix"
+    kie:
+      api_key: ""
+      base_url: "https://api.kie.ai"
+      upload_base_url: "https://kieai.redpandaai.co"
+      text_model: "gpt-image-2-text-to-image"
+      image_model: "gpt-image-2-image-to-image"
+      aspect_ratio: "auto"
+      upload_path: "images/lx-haibao"
+      callback_url: ""
     aihubmix:
       api_key: ""
       base_url: "https://aihubmix.com/v1"
@@ -130,14 +129,6 @@ lx_haibao:
       output_format: "png"
       stream: false
       partial_images: 2
-    volcengine_seedream:
-      api_key: ""
-      base_url: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "doubao-seedream-5-0-260128"
-      size: "1600x2848"
-      response_format: "url"
-      output_format: "png"
-      watermark: false
     apimart:
       api_key: ""
       base_url: "https://api.apimart.ai/v1"
@@ -231,52 +222,6 @@ lx_biaogetongbu:
         master_url: ""
       jingmo_chengke:
         master_url: ""
-
-# ============================================================
-# lx_celuehuodong
-# 要配置什么：策略活动表路径、后台导入输出目录、共补原表存档目录、目标城市和免佣卡规则。
-# 说明：默认只 dry-run；真实城市、品牌卡券规则可在 config/fog_config.yaml 或 personal_config.yaml 中覆盖。
-# ============================================================
-lx_celuehuodong:
-  strategy_workbook: "workspace/05策略活动/策略活动表/城市策略活动表2604版_v2.xlsm"
-  import_output_dir: "workspace/05策略活动/导入后台表格"
-  gongbu_archive_dir: "workspace/07共补活动/共补原表存档"
-  require_confirmed: true
-  target_cities: []
-  calendar_cities: []
-  cities: {}
-  default:
-    cards:
-      Y:
-        name: "大夜免佣卡"
-        base_hours: [0, 6]
-        subtract_gongbu: true
-      A:
-        name: "时段免佣卡"
-        base_hours: [6, 24]
-        subtract_gongbu: true
-      S:
-        name: "时段免佣卡"
-        base_hours: [0, 24]
-        subtract_gongbu: true
-      K:
-        name: "快车单免佣卡"
-        base_hours: [0, 24]
-        subtract_gongbu: true
-        k_only: true
-  prices:
-    use_excel_prices: true
-    sheet_name: "码表-各类型卡单价"
-    round_to_point_nine: true
-  styles:
-    font:
-      name: "思源黑体"
-      size: 10
-    alignment:
-      horizontal: "center"
-      vertical: "center"
-      wrap_text: false
-  use_last_row_as_template: true
 
 # ============================================================
 # lx_feishudocs

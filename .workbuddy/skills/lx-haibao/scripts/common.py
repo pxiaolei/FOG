@@ -60,19 +60,17 @@ def load_brands(root: Path | None = None) -> list[dict[str, Any]]:
 
 def load_templates(root: Path | None = None) -> list[dict[str, Any]]:
     base = root or skill_root()
-    data = load_yaml(base / "templates.yaml")
+    data = load_yaml(base / "assets" / "templates" / "templates.yaml")
     templates: list[dict[str, Any]] = []
     for template_id in as_list(data.get("templates")):
         item = data.get(str(template_id))
         if not isinstance(item, dict):
             continue
-        templates.append(
-            {
-                "template_id": str(template_id),
-                "display_name": str(item.get("display_name") or template_id),
-                "example_path": str(item.get("example_path") or ""),
-            }
-        )
+        template = dict(item)
+        template["template_id"] = str(template_id)
+        template["display_name"] = str(item.get("display_name") or template_id)
+        template["example_path"] = str(item.get("example_path") or "")
+        templates.append(template)
     return templates
 
 

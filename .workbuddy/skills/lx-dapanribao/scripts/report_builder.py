@@ -213,7 +213,7 @@ def format_report_df(report_df: pd.DataFrame) -> pd.DataFrame:
 
     df = report_df[show_cols].copy()
     df = df.sort_values(
-        ["运营主体", "completed_orders_当日值", "品牌", "城市"],
+        ["运营主体", "completed_order_count_当日值", "品牌", "城市"],
         ascending=[True, False, True, True],
         na_position="last",
     ).reset_index(drop=True)

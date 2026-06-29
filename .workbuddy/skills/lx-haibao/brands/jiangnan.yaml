@@ -7,6 +7,13 @@ assets:
   logo_path: "${SKILL_ROOT}/brand-assets/jiangnan/logo.png"
   qr_path: "${SKILL_ROOT}/brand-assets/jiangnan/qr.png"
 
+logo_overlay:
+  x_ratio: 0.05
+  y_ratio: 0.025
+  width_ratio: 0.14
+  height_ratio: 0.07
+  padding_ratio: 0.01
+
 display:
   poster_brand_name: "江南出行"
   forbidden_brand_text: []

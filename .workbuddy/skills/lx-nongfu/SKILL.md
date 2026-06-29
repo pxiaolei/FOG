@@ -201,6 +201,47 @@ python .workbuddy/skills/lx-nongfu/scripts/run_writeback.py \
 
 默认不会用主体表空值覆盖大文档已有值；确实需要清空时才使用 `--allow-empty-overwrite`。
 
+### 6. 增量同步资源位 ID
+
+当运营主体逐步填写资源位 ID（如首页 banner/横栏/开屏/侧边栏 banner ID），需要持续同步到大文档时使用：
+
+```bash
+python .workbuddy/skills/lx-nongfu/scripts/sync_ids_incremental.py \
+  --master-url "https://xxx.feishu.cn/sheets/..." \
+  --topic-sheet-name "0624飞涨卡资源位&触达配置" \
+  --contact-person "雷维亮"
+```
+
+**工作原理：**
+
+1. 首次运行时创建快照（`workspace/12农夫协作/缓存/id_sync_{对接人}_{topic}.json`），记录每个运营主体 sheet 中每个品牌城市行当前的 ID 值。
+2. 后续运行时，重新读取运营主体 sheet 的最新状态，与快照比对：
+   - **从空变成有值** → 检出为「新增 ID」，预览后确认写入大文档
+   - **已有值不变** → 跳过
+   - **尚未填写** → 报告但不同步
+3. 写入大文档前会校验目标单元格是否已有值（避免覆盖手动填入的 ID）。
+4. 写入成功后更新快照。
+
+默认 dry-run（预览）。真正写入必须加 `--confirmed`。
+
+**列布局自动识别：** 脚本会检测运营主体 sheet 的结构：
+- 布局 A：D=对接同学, E-H=ID（适用于 LX、哈啰文山、小象快跑、逸乘金华）
+- 布局 B：D-G=ID（其他运营主体）
+
+**关键参数：**
+
+| 参数 | 说明 |
+|---|---|
+| `--master-url` | 飞书大文档 URL（必传） |
+| `--master-sheet` | 大文档 sheet 名；URL 含 `?sheet=xxx` 时自动使用 |
+| `--topic-sheet-name` | 运营主体日常信息中对应 topic 的 sheet 名（必传） |
+| `--contact-person` | 对接人中文名（必传） |
+| `--confirmed` | 实际写入；不加时只预览 |
+
+**输出：**
+- 终端文本预览报告（stderr 为进度日志，stdout 为 Markdown 报告）
+- JSON 摘要文件（`workspace/12农夫协作/输出/`）
+
 ## 当前边界
 
 - `lx-nongfu` 只负责活动型“大文档拆分到日常信息表、生成通知、活动字段回填”的编排。

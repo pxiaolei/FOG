@@ -4,28 +4,25 @@
 所有 LX 分析类 skill 应使用此类进行数据库连接，
 确保连接管理和错误处理的一致性。
 
-优先级：psycopg2 -> psycopg (v3)
+驱动：PyMySQL
 """
 
-import pandas as pd
 from contextlib import contextmanager
-from typing import Optional, Generator, Any, Union
-from pathlib import Path
+from typing import Optional, Generator, Any
+
+import pandas as pd
+import pymysql
+from pymysql.constants import FIELD_TYPE
+from pymysql.converters import conversions
 
 from lxx_share.utils import Config, get_logger
 
 logger = get_logger("lxx_share.database")
 
-# ── 数据库驱动选择 ──
-try:
-    import psycopg2
-    _PG_DRIVER = "psycopg2"
-except ImportError:
-    import psycopg
-    _PG_DRIVER = "psycopg"
-
-
-_ConnectionType = Any  # psycopg2 connection 或 psycopg connection
+_ConnectionType = Any  # PyMySQL connection
+_MYSQL_CONVERSIONS = conversions.copy()
+_MYSQL_CONVERSIONS[FIELD_TYPE.DECIMAL] = float
+_MYSQL_CONVERSIONS[FIELD_TYPE.NEWDECIMAL] = float
 
 
 class DatabaseConnector:
@@ -65,30 +62,29 @@ class DatabaseConnector:
                 cursor.execute(sql)
         """
         host = self.db_config.get('host', 'localhost')
-        port = self.db_config.get('port', 5432)
+        port = int(self.db_config.get('port', 3306))
         user = self.db_config.get('user')
         password = self.db_config.get('password')
         dbname = self.db_config.get('database')  # config.yaml 用 database 作为 key
-        sslmode = self.db_config.get('sslmode')
         connect_timeout = self.db_config.get('connect_timeout')
-        optional_args = {}
-        if sslmode:
-            optional_args["sslmode"] = sslmode
-        if connect_timeout:
-            optional_args["connect_timeout"] = connect_timeout
+        read_timeout = self.db_config.get('read_timeout')
+        write_timeout = self.db_config.get('write_timeout')
 
         conn = None
         try:
-            if _PG_DRIVER == "psycopg2":
-                conn = psycopg2.connect(
-                    host=host, port=port, database=dbname,
-                    user=user, password=password, **optional_args,
-                )
-            else:
-                conn = psycopg.connect(
-                    host=host, port=port, dbname=dbname,
-                    user=user, password=password, **optional_args,
-                )
+            conn = pymysql.connect(
+                host=host,
+                port=port,
+                database=dbname,
+                user=user,
+                password=password,
+                charset=self.db_config.get('charset', 'utf8mb4'),
+                conv=_MYSQL_CONVERSIONS,
+                autocommit=False,
+                connect_timeout=int(connect_timeout or 10),
+                read_timeout=int(read_timeout or 300),
+                write_timeout=int(write_timeout or 300),
+            )
             yield conn
         finally:
             if conn is not None:
@@ -110,7 +106,10 @@ class DatabaseConnector:
         """
         try:
             with self.connect() as conn:
-                df = pd.read_sql(query, conn, params=params)
+                cursor = conn.cursor()
+                cursor.execute(query, params or [])
+                columns = [desc[0] for desc in cursor.description or []]
+                df = pd.DataFrame(cursor.fetchall(), columns=columns)
                 logger.info(f"✅ 查询成功，返回 {len(df)} 行")
                 return df
         except Exception as e:

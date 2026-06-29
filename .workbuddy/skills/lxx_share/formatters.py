@@ -108,11 +108,11 @@ class MetricsFormatter(BaseFormatter):
             if "total" in funnel:
                 total = funnel["total"]
                 content.extend([
-                    f"发单量: {total.get('placed_orders', 0):,}",
+                    f"发单量: {total.get('passenger_order_count', 0):,}",
                     f"→ 播单量: {total.get('broadcast_orders', 0):,}",
-                    f"→ 匹配量: {total.get('matched_orders', 0):,}",
-                    f"→ 应答量: {total.get('answered_orders', 0):,}",
-                    f"→ 完单数: {total.get('completed_orders', 0):,}",
+                    f"→ 匹配量: {total.get('match_count', 0):,}",
+                    f"→ 应答量: {total.get('response_count', 0):,}",
+                    f"→ 完单数: {total.get('completed_order_count', 0):,}",
                 ])
             if "rates" in funnel:
                 content.append("")

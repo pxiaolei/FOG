@@ -1,0 +1,4 @@
+interface:
+  display_name: "端外海报生成"
+  short_description: "从活动 TXT 生成带真实 Logo 和二维码的司机海报"
+  default_prompt: "Use $lx-haibao to check a driver activity TXT and generate confirmed poster samples."
