@@ -6,6 +6,7 @@ $ConfigPath = Join-Path $ProjectRoot "config/fog_config.yaml"
 $ConfigExamplePath = Join-Path $ProjectRoot "config/fog_config.yaml.example"
 $FogTool = Join-Path $ProjectRoot "tools/fog.py"
 $HaibaoScript = Join-Path $ProjectRoot ".workbuddy/skills/lx-haibao/scripts/run_poster_batch.py"
+$HaibaoRequirements = Join-Path $ProjectRoot ".workbuddy/skills/lx-haibao/assets/runtime/requirements.txt"
 
 function Write-Info {
     param([string]$Message)
@@ -137,7 +138,7 @@ if ($pythonVersionOk -and (Test-Path $HaibaoScript)) {
     Write-Info "检查 lx-haibao 海报 Skill..."
     Invoke-FogPython -Python $python -Args @($HaibaoScript, "--check")
     if ($script:LastFogPythonExitCode -ne 0) {
-        Write-Fail "lx-haibao 检查未通过。请先安装依赖：python -m pip install -r .workbuddy/skills/lx-haibao/requirements.txt"
+        Write-Fail "lx-haibao 检查未通过。请先安装依赖：python -m pip install -r $HaibaoRequirements"
         $failed = $true
     } else {
         Write-Ok "lx-haibao 检查通过"

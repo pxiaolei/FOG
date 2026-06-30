@@ -6,7 +6,7 @@ $ConfigPath = Join-Path $ProjectRoot "config/fog_config.yaml"
 $ConfigExamplePath = Join-Path $ProjectRoot "config/fog_config.yaml.example"
 $FogTool = Join-Path $ProjectRoot "tools/fog.py"
 $HaibaoScript = Join-Path $ProjectRoot ".workbuddy/skills/lx-haibao/scripts/run_poster_batch.py"
-$HaibaoRequirements = Join-Path $ProjectRoot ".workbuddy/skills/lx-haibao/requirements.txt"
+$HaibaoRequirements = Join-Path $ProjectRoot ".workbuddy/skills/lx-haibao/assets/runtime/requirements.txt"
 
 function Write-Info {
     param([string]$Message)
