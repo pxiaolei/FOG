@@ -1,6 +1,6 @@
 ---
 name: lx-haibao
-description: 企业版 WorkBuddy 专用司机活动海报生成。用于从城市活动 TXT 生成已配置品牌的司机活动海报；按 check、dry-run、confirmed sample/full generation 执行；自动按 TXT 文件名识别品牌；图片 Provider 优先 KIE，供应商可用性问题才回退 AIHubMix、APIMart；默认 hybrid 模式把模板图和真实 Logo 传给模型生成海报主体，再由脚本贴入真实二维码并逐张验证。
+description: 企业版 WorkBuddy 专用司机活动海报生成。用于从城市活动 TXT 生成已配置品牌的司机活动海报；按 check、dry-run、confirmed sample/full generation 执行；自动按 TXT 文件名识别品牌；同事共享默认只使用 KIE 图片 Provider；默认 hybrid 模式把模板图和真实 Logo 传给模型生成海报主体，再由脚本贴入真实二维码并逐张验证。
 ---
 
 # lx-haibao
@@ -50,7 +50,7 @@ Windows 使用同名 `.cmd` 入口：`check_runtime.cmd`、`haibao.cmd`。
 - 未传 `--confirmed` 时，不生成样图或成品。
 - 普通用户不要使用 `--template` 覆盖模板；管理员临时测试模板时必须同时追加 `--admin-template-override`。
 - 默认资产模式为 `hybrid`：模型必须按“模板图 -> 真实 Logo”的参考图顺序生成海报主体，二维码由脚本贴入真实素材并验真。
-- 二维码验证失败时废弃该图，在同一 provider 上按二维码原样使用要求重试；只有连接超时、网络错误、5xx、429 等供应商可用性问题才 fallback。
+- 二维码验证失败时废弃该图，在同一 provider 上按二维码原样使用要求重试；同事共享默认不配置跨 provider fallback。
 - `--asset-mode integrated` 仅用于内部对比，让模型同时参考模板、Logo、二维码；`--asset-mode overlay` 是旧版脚本贴 Logo/二维码兜底，不作为默认正式链路。
 - TXT 是活动内容真源；TXT 没有的模块不展示，不写“暂无”。
 - 最终回复必须展示脚本输出的汇总表，以及二维码验证结果。

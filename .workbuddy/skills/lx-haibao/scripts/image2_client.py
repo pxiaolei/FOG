@@ -37,8 +37,8 @@ from lxx_share.fog_config import get_section  # noqa: E402
 BUILTIN_IMAGE_GEN_PROVIDER = "builtin_image_gen"
 BUILTIN_IMAGE_GEN_ALIASES = {"builtin_image_gen", "codex_image_gen", "image_gen"}
 DEFAULT_PROVIDER_PRIMARY = "kie"
-DEFAULT_PROVIDER_FALLBACK = "aihubmix"
-DEFAULT_PROVIDERS = [DEFAULT_PROVIDER_PRIMARY, DEFAULT_PROVIDER_FALLBACK, "apimart"]
+DEFAULT_PROVIDER_FALLBACK = ""
+DEFAULT_PROVIDERS = [DEFAULT_PROVIDER_PRIMARY]
 DEFAULT_IMAGE_TASK_INITIAL_DELAY_SECONDS = 30
 DEFAULT_IMAGE_TASK_POLL_ATTEMPTS = 40
 DEFAULT_IMAGE_TASK_POLL_INTERVAL_SECONDS = 30
@@ -2039,10 +2039,7 @@ def require_api_key() -> str:
         missing.append(provider_name)
     raise RuntimeError(
         "缺少图片生成 API Key："
-        "KIE 请配置 KIE_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.kie.api_key；"
-        "AIHubMix 请配置 AIHUBMIX_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.aihubmix.api_key；"
-        "APIMart 请配置 APIMART_API_KEY/OPENAI_API_KEY 或 lx_haibao.image_api.apimart.api_key；"
-        "若要使用 Codex 内置兜底，请把 builtin_image_gen 加入 lx_haibao.image_api.providers。"
+        "KIE 请配置 KIE_API_KEY 或 config/fog_config.yaml 的 lx_haibao.image_api.kie.api_key。"
     )
 
 
@@ -2183,7 +2180,7 @@ def check_providers() -> dict[str, Any]:
     provider_order = _configured_provider_names()
     providers: list[dict[str, Any]] = []
     provider_names: list[str] = []
-    for provider_name in [*provider_order, "kie", "aihubmix", "apimart", BUILTIN_IMAGE_GEN_PROVIDER]:
+    for provider_name in provider_order:
         normalized = _normalize_provider_name(provider_name)
         if normalized not in provider_names:
             provider_names.append(normalized)

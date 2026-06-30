@@ -14,6 +14,9 @@ logo_overlay:
   height_ratio: 0.07
   padding_ratio: 0.01
 
+template:
+  preferred_template_id: "template10"
+
 display:
   poster_brand_name: "网路优行"
   forbidden_brand_text: []

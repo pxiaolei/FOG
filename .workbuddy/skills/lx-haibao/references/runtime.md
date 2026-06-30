@@ -8,7 +8,7 @@
 config/fog_config.yaml
 ```
 
-`lx_haibao.image_api` 默认按顺序使用 `kie`、`aihubmix`、`apimart`，可保留 `builtin_image_gen` 作为 Codex agent 手动兜底。不要把新 API Key 写进 `assets/config.yaml`。
+`lx_haibao.image_api` 同事共享默认只使用 `kie`。不要把 AIHubMix、APIMart 或 Codex 内置 `builtin_image_gen` 写进共享配置；也不要把新 API Key 写进 `assets/config.yaml`。
 
 常用配置键：
 
@@ -23,18 +23,8 @@ config/fog_config.yaml
 - `kie.aspect_ratio`
 - `kie.upload_path`
 - `kie.callback_url`
-- `aihubmix.api_key`
-- `aihubmix.base_url`
-- `aihubmix.task_base_url`
-- `aihubmix.model`
-- `aihubmix.endpoint`
-- `aihubmix.quality`
-- `aihubmix.output_format`
-- `apimart.api_key`
-- `apimart.base_url`
-- `apimart.model`
 
-兼容环境变量包括 `KIE_API_KEY`、`AIHUBMIX_API_KEY`、`APIMART_API_KEY`、`OPENAI_API_KEY` 和旧的 `POSTER_*` 变量。
+同事共享环境只需要配置 `KIE_API_KEY`。旧的 `POSTER_*` 变量仍可用于轮询间隔、超时等本地运行参数。
 
 异步生图任务默认按慢任务处理：提交后等待 30 秒再查询，每 30 秒轮询一次，最多轮询 40 次，避免 KIE 后台仍在生成时本地过早判定超时。可通过 `POSTER_IMAGE_TASK_INITIAL_DELAY_SECONDS`、`POSTER_IMAGE_TASK_POLL_INTERVAL_SECONDS`、`POSTER_IMAGE_TASK_POLL_ATTEMPTS` 临时覆盖。
 
@@ -70,7 +60,7 @@ config/fog_config.yaml
 5. 用户确认样图后，运行 `--confirmed` 生成成品。
 6. 多品牌可使用 `--workers N`，默认顺序执行。
 
-如果汇总表状态为 `等待内置 image_gen`，读取 `imagegen_request_path`，按 `reference_images` 顺序用 `view_image` 打开参考图，再调用内置 `image_gen`。默认 hybrid 顺序是模板图、真实 Logo；生成后脚本会贴入真实二维码并继续验真。
+同事 WorkBuddy 环境不依赖 Codex 内置 `image_gen`。如果维护者在个人环境中临时使用内置 `image_gen` 兜底，该能力只能留在个人真实配置或人工流程里，不进入共享配置。
 
 ## 内容规则
 
@@ -79,6 +69,10 @@ config/fog_config.yaml
 - 活动内容只能来自本次 TXT 和用户确认。
 - 活动日期只使用 TXT 中出现的日期。
 - 用户本次提供的 TXT 中，所有活动模块默认展示，包括免佣、飞涨、卡券、全量活动、新人权益、成长奖、司邀司。
+- 活动模块数量不固定：TXT 有几个活动类型就展示几个；不要为了凑模板预设区块而新增空模块、合成模块或替换模块标题。
+- 新增活动类型建议在 TXT 中用 `【活动标题】` 分段，脚本会把分段标题纳入模块数和长海报判断。
+- 活动类型较少时，收紧中部活动区，不保留空白预设卡片；活动类型较多时，优先拉长海报和增加活动卡片，不靠压缩字号硬塞内容。
+- 日期、星期、时间段、金额、奖励、单量和门槛必须逐字按 TXT 展示；TXT 中已给出星期时，不得自行推算、改写或顺延星期。
 - 不展示内部补贴属性、历史/过期/已结束/仅供参考/明确标记不展示的内容。
 - 不展示 `共补`、`共补免佣`、`平台共补`、`是否共补`。
 - `全量活动` 是正常展示模块，除非用户明确要求不展示。
@@ -93,7 +87,7 @@ config/fog_config.yaml
 
 - 默认参考图顺序固定为：模板图、品牌 Logo。
 - Logo 从 `brand-assets/<brand>/logo.png` 读取，必须自然融入顶部品牌区。
-- 二维码从 `brand-assets/<brand>/qr.png` 读取，按模板 `qr_overlay` 生成紧凑白边二维码卡片后贴入，必须保持正方形、清晰、完整、可扫码。多品牌模板优先使用 `anchor: bottom_right`，按最终海报右下角几何边距锚定二维码；贴码前会检查底部 footer 高度，若 footer 高度不足以容纳二维码卡片，会先向下补同色 footer，再贴入二维码，避免二维码压到上方活动卡片或超出 footer。
+- 二维码从 `brand-assets/<brand>/qr.png` 读取，按模板 `qr_overlay` 生成紧凑白边二维码卡片后贴入，必须保持正方形、清晰、完整、可扫码。多品牌模板优先使用 `anchor: bottom_right`，按最终海报右下角几何边距锚定二维码；贴码前会检查底部 footer 高度，若 footer 高度不足以容纳二维码卡片，会先向下补同色 footer，再贴入二维码，避免二维码压到上方活动卡片或超出 footer。贴码前会清理右下角二维码安全区，避免模型在该区域生成的 footer 图标、卖点文案或装饰被真实二维码卡片遮挡。对底部没有安全贴码区的模板，可配置 `append_footer_for_qr: true`，脚本会直接追加一段二维码 footer，避免覆盖原内容。
 - 源二维码必须可解码。
 - 海报二维码必须可解码。
 - 海报二维码内容必须与品牌源二维码完全一致。

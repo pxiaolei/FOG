@@ -99,7 +99,7 @@ lx_zhutichaibiao:
 # ============================================================
 # lx_haibao
 # 要配置什么：端外海报输出目录和图片生成 API Key。
-# 从哪里获取：KIE、AIHubMix 或 APIMart 控制台。维护者在 Codex 环境中可在个人真实配置里追加 builtin_image_gen 兜底；同事共享默认不依赖 Codex。
+# 从哪里获取：KIE 控制台。同事共享默认只依赖 KIE，不配置 AIHubMix、APIMart 或 Codex 内置 image_gen。
 # ============================================================
 lx_haibao:
   output_dir: "workspace/09端外海报图/产出图"
@@ -107,9 +107,9 @@ lx_haibao:
   tmp_dir: "workspace/09端外海报图/临时图"
   log_dir: "workspace/09端外海报图/处理日志"
   image_api:
-    providers: ["kie", "aihubmix", "apimart"]
+    providers: ["kie"]
     provider_primary: "kie"
-    provider_fallback: "aihubmix"
+    provider_fallback: ""
     kie:
       api_key: ""
       base_url: "https://api.kie.ai"
@@ -119,20 +119,6 @@ lx_haibao:
       aspect_ratio: "auto"
       upload_path: "images/lx-haibao"
       callback_url: ""
-    aihubmix:
-      api_key: ""
-      base_url: "https://aihubmix.com/v1"
-      task_base_url: "https://api.aihubmix.com/v1"
-      model: "gpt-image-2"
-      endpoint: "images_edits"
-      quality: "low"
-      output_format: "png"
-      stream: false
-      partial_images: 2
-    apimart:
-      api_key: ""
-      base_url: "https://api.apimart.ai/v1"
-      model: "gpt-image-2"
 
 # ============================================================
 # lx_dapanribao

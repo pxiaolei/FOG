@@ -1,11 +1,11 @@
 # lx-haibao 海报生成配置模板
-# 复制为 config.yaml 后，把管理员提供的图片生成 Key 填到对应 provider。
+# 复制为 config.yaml 后，把管理员提供的 KIE 图片生成 Key 填进去。
 # config.yaml 是个人真实配置，不要发到群里，也不要打进分享包。
 
 image_api:
-  providers: ["kie", "aihubmix", "apimart"]
+  providers: ["kie"]
   provider_primary: "kie"
-  provider_fallback: "aihubmix"
+  provider_fallback: ""
 
   kie:
     api_key: ""
@@ -16,19 +16,3 @@ image_api:
     aspect_ratio: "auto"
     upload_path: "images/lx-haibao"
     callback_url: ""
-
-  aihubmix:
-    api_key: ""
-    base_url: "https://aihubmix.com/v1"
-    task_base_url: "https://api.aihubmix.com/v1"
-    model: "gpt-image-2"
-    endpoint: "images_edits"
-    quality: "low"
-    output_format: "png"
-    stream: false
-    partial_images: 2
-
-  apimart:
-    api_key: ""
-    base_url: "https://api.apimart.ai/v1"
-    model: "gpt-image-2"

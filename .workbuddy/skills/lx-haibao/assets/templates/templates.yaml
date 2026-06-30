@@ -32,79 +32,106 @@ template02:
   example_path: "${SKILL_ROOT}/assets/templates/template02.png"
   layout_description_path: "${SKILL_ROOT}/assets/templates/layout-descriptions/template02.md"
   qr_overlay:
+    anchor: "bottom_right"
     x_ratio: 0.79
     y_ratio: 0.855
     size_ratio: 0.145
-    padding_ratio: 0.05
+    padding_ratio: 0.08
+    right_margin_ratio: 0.035
+    bottom_margin_ratio: 0.015
 
 template03:
   display_name: "template03"
   example_path: "${SKILL_ROOT}/assets/templates/template03.png"
   qr_overlay:
+    anchor: "bottom_right"
     x_ratio: 0.79
     y_ratio: 0.1
     size_ratio: 0.145
-    padding_ratio: 0.05
+    padding_ratio: 0.08
+    right_margin_ratio: 0.035
+    bottom_margin_ratio: 0.015
 
 template04:
   display_name: "template04"
   example_path: "${SKILL_ROOT}/assets/templates/template04.png"
   qr_overlay:
+    anchor: "bottom_right"
     x_ratio: 0.795
     y_ratio: 0.84
     size_ratio: 0.145
-    padding_ratio: 0.05
+    padding_ratio: 0.08
+    right_margin_ratio: 0.035
+    bottom_margin_ratio: 0.015
 
 template05:
   display_name: "template05"
   example_path: "${SKILL_ROOT}/assets/templates/template05.png"
   qr_overlay:
+    anchor: "bottom_right"
     x_ratio: 0.795
     y_ratio: 0.855
     size_ratio: 0.145
-    padding_ratio: 0.05
+    padding_ratio: 0.08
+    right_margin_ratio: 0.035
+    bottom_margin_ratio: 0.015
 
 template06:
   display_name: "template06"
   example_path: "${SKILL_ROOT}/assets/templates/template06.png"
   qr_overlay:
+    anchor: "bottom_right"
     x_ratio: 0.795
     y_ratio: 0.855
     size_ratio: 0.145
-    padding_ratio: 0.05
+    padding_ratio: 0.08
+    right_margin_ratio: 0.035
+    bottom_margin_ratio: 0.015
 
 template07:
   display_name: "template07"
   example_path: "${SKILL_ROOT}/assets/templates/template07.png"
   qr_overlay:
+    anchor: "bottom_right"
     x_ratio: 0.795
     y_ratio: 0.1
     size_ratio: 0.145
-    padding_ratio: 0.05
+    padding_ratio: 0.08
+    right_margin_ratio: 0.035
+    bottom_margin_ratio: 0.015
 
 template08:
   display_name: "template08"
   example_path: "${SKILL_ROOT}/assets/templates/template08.png"
   qr_overlay:
+    anchor: "bottom_right"
     x_ratio: 0.075
     y_ratio: 0.825
     size_ratio: 0.145
-    padding_ratio: 0.05
+    padding_ratio: 0.08
+    right_margin_ratio: 0.035
+    bottom_margin_ratio: 0.015
 
 template09:
   display_name: "template09"
   example_path: "${SKILL_ROOT}/assets/templates/template09.png"
   qr_overlay:
+    anchor: "bottom_right"
     x_ratio: 0.795
     y_ratio: 0.84
     size_ratio: 0.145
-    padding_ratio: 0.05
+    padding_ratio: 0.08
+    right_margin_ratio: 0.035
+    bottom_margin_ratio: 0.015
 
 template10:
   display_name: "template10"
   example_path: "${SKILL_ROOT}/assets/templates/template10.png"
   qr_overlay:
+    anchor: "bottom_right"
     x_ratio: 0.795
     y_ratio: 0.84
     size_ratio: 0.145
-    padding_ratio: 0.05
+    padding_ratio: 0.08
+    right_margin_ratio: 0.035
+    bottom_margin_ratio: 0.015

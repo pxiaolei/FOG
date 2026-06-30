@@ -20,14 +20,9 @@
 | 安安、安安用车 | `anan` | `template03` |
 | 旗妙、旗妙出行、旗妙出行极速版 | `qimiaochuxingjisu` | `template06` |
 | 易达、易达出行、易达-其他 | `yidahcuxing` | `template10` |
-
-未绑定，继续使用默认模板：
-
-| 品牌 | brand_id |
-|---|---|
-| 江南出行 | `jiangnan` |
-| 土生途行 | `tusheng` |
-| 网路优行 | `wangluyouxing` |
+| 江南出行 | `jiangnan` | `template03` |
+| 土生途行 | `tusheng` | `template07` |
+| 网路优行 | `wangluyouxing` | `template10` |
 
 新出现但暂未接入的素材目录：`renwodache`、`richuchuxing`、`wangluchuxing`、`yidayouxing`。用户明确要求接入前，不要为这些目录创建品牌配置。
 
@@ -65,6 +60,7 @@ template:
 - 模板图必须品牌中性，只保留版式结构、信息层级和扫码区位置感，不保留旧品牌、旧二维码或假二维码。
 - 模板不要内置大白底扫码卡片；二维码白边和卡片由脚本后处理生成，避免模型把白底当成真实内容放大或错位。
 - 默认 `hybrid` 模式依赖 `qr_overlay`，用于把真实二维码贴入模板扫码区；模型不生成二维码。多品牌模板建议使用 `anchor: bottom_right`，让二维码按最终海报右下角几何边距定位，避免依赖 footer 颜色识别或整张图 y_ratio。
+- 如果模板底部没有安全贴码区，或旧版二维码原本位于顶部，给该模板的 `qr_overlay` 增加 `append_footer_for_qr: true`；脚本会在最终海报底部追加一段同色 footer 后再贴二维码，避免覆盖原活动内容。
 - 如模板需要支持内容偏多时自动拉长，配置 `content_sizing.long_size` 和对应阈值；默认策略应优先拉长画幅，不把活动模块硬压进固定高度。
 - 如需启用旧版 `--asset-mode overlay`，每张模板只允许一个二维码占位区；`qr_overlay` 使用最终海报宽高比例，`x_ratio` 和 `y_ratio` 表示二维码左上角，`size_ratio` 按宽度计算。
 - 模板图改名或移动后，同步更新 `assets/templates/templates.yaml`。
