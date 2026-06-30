@@ -9,7 +9,7 @@ SKILL_DIR = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = SKILL_DIR / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from lx_shujuku.client import DataReportingClient
+from lx_shujuku.client import DataReportingClient, _parse_allowed_table_names
 from lx_shujuku.query_policy import ensure_readonly_sql
 
 
@@ -143,6 +143,47 @@ class AuditPackageTests(unittest.TestCase):
         self.assertTrue(audit["safe_sql"].endswith("LIMIT 100"))
         self.assertEqual(audit["row_count"], 1)
         self.assertEqual(audit["rows"][0]["city_name"], "上海市")
+
+
+class TableDiscoveryTests(unittest.TestCase):
+    def test_parse_allowed_table_names_from_server_error(self):
+        message = (
+            "查询失败: 表 [missing_table] 不在允许查询的范围内，"
+            "仅支持以下表: [card_data, honghu_profit_data, operator_brand]"
+        )
+
+        self.assertEqual(
+            _parse_allowed_table_names(message),
+            ["card_data", "honghu_profit_data", "operator_brand"],
+        )
+
+    def test_list_tables_merges_show_tables_and_server_allowed_tables(self):
+        class FakeClient(DataReportingClient):
+            def __init__(self):
+                self.schema = SimpleNamespace(table_names={"old_table"})
+
+            def execute(self, sql, enforce_table_whitelist=True):
+                if sql == "SHOW TABLES":
+                    return [
+                        {
+                            "Tables_in_datareporting": "old_table",
+                            "TABLE_COMMENT": "旧表",
+                        }
+                    ]
+                if "lx_shujuku_table_probe_missing" in sql:
+                    raise RuntimeError(
+                        "查询失败: 表 [lx_shujuku_table_probe_missing] "
+                        "不在允许查询的范围内，仅支持以下表: [old_table, new_table]"
+                    )
+                return []
+
+        self.assertEqual(
+            FakeClient().list_tables(),
+            [
+                {"name": "new_table", "comment": ""},
+                {"name": "old_table", "comment": "旧表"},
+            ],
+        )
 
 
 if __name__ == "__main__":

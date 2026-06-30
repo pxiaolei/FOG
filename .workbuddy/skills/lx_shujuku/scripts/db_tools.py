@@ -68,11 +68,26 @@ def cmd_list_tables(client: DataReportingClient) -> None:
         print(f"  {i:2d}. {t['name']:<40s} {t['comment']}")
 
 
-def cmd_describe(client: DataReportingClient, table: str) -> None:
-    """查看表结构"""
-    columns = client.describe(table)
+def cmd_describe(client: DataReportingClient, table: str, no_whitelist: bool = False) -> None:
+    """查看表结构，支持绕过本地白名单查看新分享表。"""
+    if no_whitelist:
+        columns = client.describe_online(table)
+        source = "（线上实时）"
+    else:
+        try:
+            columns = client.describe(table)
+            source = ""
+        except RuntimeError as e:
+            err = str(e)
+            if "表不在 schema 白名单中" in err:
+                logger.warning(f"{err}，自动切换为线上实时结构")
+                columns = client.describe_online(table)
+                source = "（线上实时，未纳入本地白名单）"
+            else:
+                raise
+
     print(f"\n{'='*80}")
-    print(f"表: {table} ({len(columns)} 个字段)")
+    print(f"表: {table} ({len(columns)} 个字段) {source}")
     print(f"{'='*80}\n")
     print(f"  {'字段名':<35s} {'类型':<20s} {'键':<5s} {'可为空':<6s} {'注释'}")
     print(f"  {'-'*33} {'-'*18} {'-'*3} {'-'*4} {'-'*20}")
@@ -95,15 +110,21 @@ def cmd_query(
     json_output: bool = False,
     output: str = "",
     audit: bool = False,
+    no_whitelist: bool = False,
 ) -> None:
-    """执行 SQL 查询"""
+    """执行 SQL 查询，支持绕过本地白名单查询新分享表。"""
     # 自动追加 LIMIT（如果未指定）
     if sql.lstrip().lower().startswith("select") and "limit" not in sql.lower():
         sql = f"{sql.rstrip(';')} LIMIT {limit}"
 
     saved_path: Path | None = None
     if json_output or output or audit:
-        package = client.execute_audited(sql, question=question, metric=metric)
+        package = client.execute_audited(
+            sql,
+            question=question,
+            metric=metric,
+            enforce_table_whitelist=not no_whitelist,
+        )
         rows = package["rows"]
         if output or audit:
             saved_path = _write_query_run(package, output or "auto")
@@ -113,7 +134,7 @@ def cmd_query(
                 print(f"\n证据包已保存: {saved_path}")
             return
     else:
-        rows = client.execute(sql)
+        rows = client.execute(sql, enforce_table_whitelist=not no_whitelist)
 
     print(f"\n查询: {sql}")
     print(f"返回: {len(rows)} 行\n")
@@ -135,9 +156,14 @@ def cmd_query(
         print()
 
 
-def cmd_count(client: DataReportingClient, table: str, where: str = "") -> None:
+def cmd_count(
+    client: DataReportingClient,
+    table: str,
+    where: str = "",
+    no_whitelist: bool = False,
+) -> None:
     """查询记录数"""
-    cnt = client.count(table, where)
+    cnt = client.count(table, where, enforce_table_whitelist=not no_whitelist)
     print(f"\n{table}: {cnt:,} 条记录")
     if where:
         print(f"条件: {where}")
@@ -151,7 +177,7 @@ def cmd_catalog(client: DataReportingClient) -> None:
     print(f"{'='*80}\n")
 
     for t in tables:
-        columns = client.describe(t["name"])
+        columns = client.describe_online(t["name"])
         print(f"[{t['name']}] {t['comment']} ({len(columns)} 字段)")
         # 只显示关键字段
         key_cols = [c for c in columns if c["key"] == "PRI" or c["comment"]]
@@ -423,6 +449,8 @@ def main() -> None:
   %(prog)s describe card_data
   %(prog)s catalog
   %(prog)s query "SELECT * FROM activity_data LIMIT 5"
+  %(prog)s query "SELECT * FROM new_table LIMIT 5" --no-whitelist
+  %(prog)s describe new_table --no-whitelist
   %(prog)s count activity_data
   %(prog)s schema
   %(prog)s health
@@ -431,6 +459,7 @@ def main() -> None:
   %(prog)s template activity-by-operator --operator "方舟行（上海）"
   %(prog)s template capacity-by-brand --brand "方舟行车主" --date "2025-05-12"
         """,
+
     )
 
     # 全局参数放最前面（parse_known_args 风格）
@@ -445,6 +474,11 @@ def main() -> None:
     # describe
     desc_parser = subparsers.add_parser("describe", aliases=["desc"], help="查看表结构")
     desc_parser.add_argument("table", help="表名")
+    desc_parser.add_argument(
+        "--no-whitelist",
+        action="store_true",
+        help="绕过本地 schema 白名单，直接查看线上表结构",
+    )
 
     # catalog
     subparsers.add_parser("catalog", aliases=["cat"], help="全量表结构概览")
@@ -458,11 +492,21 @@ def main() -> None:
     query_parser.add_argument("--json", dest="json_output", action="store_true", help="输出结构化证据包 JSON")
     query_parser.add_argument("--audit", action="store_true", help="保存结构化证据包到默认目录")
     query_parser.add_argument("--output", "-o", default="", help="保存结构化证据包；可填文件、目录或 auto")
+    query_parser.add_argument(
+        "--no-whitelist",
+        action="store_true",
+        help="绕过本地 schema 白名单，允许查询尚未同步的新分享表",
+    )
 
     # count
     count_parser = subparsers.add_parser("count", help="查询表记录数")
     count_parser.add_argument("table", help="表名")
     count_parser.add_argument("--where", default="", help="WHERE 条件")
+    count_parser.add_argument(
+        "--no-whitelist",
+        action="store_true",
+        help="绕过本地 schema 白名单，直接查询线上授权表记录数",
+    )
 
     # schema
     schema_parser = subparsers.add_parser("schema", help="导出全量 Schema JSON")
@@ -538,7 +582,7 @@ def main() -> None:
         if args.command in ("list-tables", "ls"):
             cmd_list_tables(client)
         elif args.command in ("describe", "desc"):
-            cmd_describe(client, args.table)
+            cmd_describe(client, args.table, no_whitelist=getattr(args, "no_whitelist", False))
         elif args.command in ("catalog", "cat"):
             cmd_catalog(client)
         elif args.command in ("query", "q"):
@@ -551,9 +595,15 @@ def main() -> None:
                 json_output=args.json_output,
                 output=args.output,
                 audit=args.audit,
+                no_whitelist=getattr(args, "no_whitelist", False),
             )
         elif args.command == "count":
-            cmd_count(client, args.table, args.where)
+            cmd_count(
+                client,
+                args.table,
+                args.where,
+                no_whitelist=getattr(args, "no_whitelist", False),
+            )
         elif args.command == "schema":
             cmd_schema(client, args.output)
         elif args.command == "schema-diff":

@@ -15,6 +15,7 @@ lx_shujuku 公司数据库客户端
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -23,7 +24,7 @@ from urllib.request import Request, build_opener, ProxyHandler
 from urllib.error import HTTPError, URLError
 
 from .operator_brand import build_mabiao_mapping, normalize_operator_brand_rows
-from .query_policy import ensure_readonly_sql, validate_limit
+from .query_policy import ensure_readonly_sql, validate_identifier, validate_limit
 from .schema import SchemaCatalog
 
 logger = logging.getLogger(__name__)
@@ -370,14 +371,21 @@ class DataReportingClient:
         Returns:
             [{"name": "表名", "comment": "注释"}, ...]
         """
-        rows = self.execute("SHOW TABLES")
-        result = []
+        rows = self.execute("SHOW TABLES", enforce_table_whitelist=False)
+        by_name: dict[str, dict[str, str]] = {}
         for row in rows:
             # MySQL: {"Tables_in_datareporting": "xxx", "TABLE_COMMENT": "xxx"}
             table_name = row.get("Tables_in_datareporting", "")
             comment = row.get("TABLE_COMMENT", "")
-            result.append({"name": table_name, "comment": comment})
-        return result
+            if table_name:
+                by_name[table_name] = {"name": table_name, "comment": comment}
+
+        # 公司查询服务还有一层服务端允许表列表。历史上 SHOW TABLES
+        # 可能只返回旧子集，所以这里合并服务端错误信息中的允许表名。
+        for table_name in self._server_allowed_table_names():
+            by_name.setdefault(table_name, {"name": table_name, "comment": ""})
+
+        return [by_name[name] for name in sorted(by_name)]
 
     def describe(self, table_name: str) -> list[dict[str, Any]]:
         """
@@ -416,13 +424,23 @@ class DataReportingClient:
             for r in rows
         ]
 
-    def count(self, table_name: str, where: str = "") -> int:
+    def count(
+        self,
+        table_name: str,
+        where: str = "",
+        enforce_table_whitelist: bool = True,
+    ) -> int:
         """查询表记录数"""
-        safe_table = self.schema.validate_table_name(table_name)
+        safe_table = (
+            self.schema.validate_table_name(table_name)
+            if enforce_table_whitelist
+            else validate_identifier(table_name)
+        )
         sql = f"SELECT COUNT(*) AS cnt FROM {safe_table}"
         if where:
             sql += f" WHERE {where}"
-        row = self.execute_one(sql)
+        rows = self.execute(sql, enforce_table_whitelist=enforce_table_whitelist)
+        row = rows[0] if rows else None
         return int(row["cnt"]) if row else 0
 
     # ---- 常用业务查询模板 ----
@@ -584,7 +602,7 @@ class DataReportingClient:
         if city:
             conditions.append(f"city_name = '{self._esc(city)}'")
         where = " AND ".join(conditions) if conditions else "1=1"
-        return self.execute(f"SELECT * FROM brand_city_tr_config WHERE {where}")
+        return self.execute(f"SELECT * FROM brand_city_tr_data WHERE {where}")
 
     # ---- 工具方法 ----
 
@@ -641,6 +659,23 @@ class DataReportingClient:
 
         return result
 
+    def _server_allowed_table_names(self) -> list[str]:
+        """
+        读取服务端 SQL 查询网关的允许表列表。
+
+        dataReporting 不开放 information_schema；服务端越权错误会返回
+        “仅支持以下表: [...]”。这个列表比 SHOW TABLES 更接近真实授权边界。
+        """
+        probe_table = "lx_shujuku_table_probe_missing"
+        try:
+            self.execute(
+                f"SELECT * FROM {probe_table} LIMIT 1",
+                enforce_table_whitelist=False,
+            )
+        except RuntimeError as exc:
+            return _parse_allowed_table_names(str(exc))
+        return []
+
 
 # ---- 便捷工厂函数 ----
 
@@ -655,6 +690,24 @@ def create_client(config_path: Optional[str] = None) -> DataReportingClient:
         DataReportingClient 实例
     """
     return DataReportingClient(config_path=config_path)
+
+
+def _parse_allowed_table_names(message: str) -> list[str]:
+    match = re.search(r"仅支持以下表:\s*\[([^\]]+)\]", message)
+    if not match:
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw_name in match.group(1).split(","):
+        name = raw_name.strip()
+        if not name or name in seen:
+            continue
+        try:
+            result.append(validate_identifier(name))
+        except RuntimeError:
+            continue
+        seen.add(name)
+    return result
 
 
 def _split_yaml_key_value(line: str) -> tuple[str, str]:
