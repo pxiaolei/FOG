@@ -68,8 +68,8 @@ lx_shujuku:
 
 # ============================================================
 # lx_hhbbu
-# 要配置什么：hhdata B补来源导出的输出目录，以及同事本机 hhdata Excel 位置。
-# 说明：lx-hhbbu 仍只查询公司 dataReporting；local_hhdata 只用于定位/校验同事本地 Excel，不连接本地 RDS、不写数据库。
+# 要配置什么：hhdata B补来源查询、审计输出目录，以及同事本机 hhdata Excel 写回位置。
+# 说明：lx-hhbbu 查询公司 dataReporting 后，按 date + city_name + brand_name 写回本地 hhdata Excel 的三列；不连接本地 RDS、不写数据库。
 # 用法：如果同事把 hhdata 固定放在某个目录，填写 input_dir；如果只有单个固定文件，填写 file。
 # ============================================================
 lx_hhbbu:
@@ -78,6 +78,8 @@ lx_hhbbu:
     source_type: "excel_dir"
     input_dir: "workspace/02数据导入/待处理/hhdata"
     file: ""
+    sheet_name: ""
+    backup_dir: "workspace/02数据导入/处理日志/lx-hhbbu/backups"
     required_before_run: false
 
 # ============================================================

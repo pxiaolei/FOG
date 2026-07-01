@@ -134,6 +134,8 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
         local_hhdata = hhbbu.get("local_hhdata", {})
         if isinstance(local_hhdata, dict) and local_hhdata.get("input_dir"):
             dirs.append(resolve_path(local_hhdata.get("input_dir")))
+        if isinstance(local_hhdata, dict) and local_hhdata.get("backup_dir"):
+            dirs.append(resolve_path(local_hhdata.get("backup_dir")))
 
     haibao = config.get("lx_haibao", {})
     if isinstance(haibao, dict):
