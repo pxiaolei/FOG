@@ -28,6 +28,8 @@ config/fog_config.yaml
 
 异步生图任务默认按慢任务处理：提交后等待 30 秒再查询，每 30 秒轮询一次，最多轮询 40 次，避免 KIE 后台仍在生成时本地过早判定超时。可通过 `POSTER_IMAGE_TASK_INITIAL_DELAY_SECONDS`、`POSTER_IMAGE_TASK_POLL_INTERVAL_SECONDS`、`POSTER_IMAGE_TASK_POLL_ATTEMPTS` 临时覆盖。
 
+底部 footer 文案由脚本用本机中文字体绘制。脚本会优先查找 macOS、Windows、Linux 常见中文字体，包括 macOS 华文/冬青、Windows 微软雅黑/黑体/宋体、Linux Noto Sans CJK/文泉驿等；如运行环境没有这些字体，可用 `POSTER_CJK_FONT_PATH` 或 `POSTER_FOOTER_FONT_PATH` 指向可用中文字体文件。找不到可用中文字体时，检查和生成都会失败，不再用 PIL 默认小字体继续出图。
+
 ## 检查命令
 
 在 `.workbuddy/skills/lx-haibao/` 下运行：
@@ -87,7 +89,7 @@ config/fog_config.yaml
 
 - 默认参考图顺序固定为：模板图、品牌 Logo。
 - Logo 从 `brand-assets/<brand>/logo.png` 读取，必须自然融入顶部品牌区。
-- 二维码从 `brand-assets/<brand>/qr.png` 读取，按模板 `qr_overlay` 生成紧凑白边二维码卡片后贴入，必须保持正方形、清晰、完整、可扫码。多品牌模板优先使用 `anchor: bottom_right`，按最终海报右下角几何边距锚定二维码；该模式默认由脚本重绘整条底部 footer，按二维码卡片高度计算 footer 高度，左侧确定性绘制“扫码下载司机端 / 了解更多活动福利 / 最终解释权”文案，右侧贴真实二维码卡片。模型生成的 footer 预留框、伪二维码、图标或卖点文案会被整条 footer 覆盖，避免只清理右下角小块后留下残影。对底部没有安全贴码区且需要增加画布的模板，可配置 `append_footer_for_qr: true`，脚本会直接追加一段同色 footer 后再贴二维码。
+- 二维码从 `brand-assets/<brand>/qr.png` 读取，按模板 `qr_overlay` 生成紧凑白边二维码卡片后贴入，必须保持正方形、清晰、完整、可扫码。多品牌模板优先使用 `anchor: bottom_right`，按最终海报右下角几何边距锚定二维码；该模式默认由脚本在模型生成图下方追加整条 footer，按二维码卡片高度计算 footer 高度，左侧确定性绘制“扫码下载司机端 / 了解更多活动福利 / 最终解释权”文案，右侧贴真实二维码卡片。追加 footer 不覆盖模型生成图中的正文、表格或活动规则。只有模板明确配置 `append_footer_for_qr: false` 时，脚本才会在原图底部覆盖 footer。
 - 源二维码必须可解码。
 - 海报二维码必须可解码。
 - 海报二维码内容必须与品牌源二维码完全一致。

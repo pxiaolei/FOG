@@ -50,6 +50,32 @@ SIZE_POLICY_AUTO = "auto"
 SIZE_POLICY_FIXED = "fixed"
 DEFAULT_SIZE_POLICY = SIZE_POLICY_AUTO
 DEFAULT_LONG_POSTER_SIZE = "1:2"
+COMMON_CJK_FONT_PATHS = (
+    # macOS
+    "/System/Library/Fonts/STHeiti Medium.ttc",
+    "/System/Library/Fonts/Supplemental/Songti.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
+    # Windows
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/msyhbd.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/simsun.ttc",
+    "C:/Windows/Fonts/Deng.ttf",
+    "C:/Windows/Fonts/Dengb.ttf",
+    # Linux
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Bold.otf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJKsc-Regular.otf",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/arphic/ukai.ttc",
+    "/usr/share/fonts/truetype/arphic/uming.ttc",
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+)
 
 
 REQUIRED_RUNTIME_MODULES = {
@@ -74,7 +100,7 @@ ACTIVITY_LAYOUT_RULES = """活动排版规则：
 - 以 TXT 中的真实活动类型作为模块边界；常见模块和新增模块都按独立活动卡片处理。
 - 活动类型较少时，收紧中部活动区，不保留空白预设卡片。
 - 活动类型较多时，纵向增加活动卡片和海报高度，优先拉长画幅，不压缩到难以阅读。
-- 底部右下角必须保留二维码安全区，不放卖点文字、图标、车辆、装饰或活动规则。"""
+- 脚本会在成图下方追加扫码下载 footer 并贴入真实二维码；模型不要在内容区内生成二维码、扫码卡片或底栏 CTA。"""
 
 REFERENCE_IMAGE_RULES = """模板示例图中的"品牌占位""城市名称占位""二维码占位区""X元"以及旧日期、旧金额、旧奖励都是占位或旧内容，不得原样保留到新海报。品牌 Logo 只来自真实 Logo 参考图；二维码按 asset_mode 由真实二维码参考图生成或由脚本贴入。"""
 
@@ -388,15 +414,47 @@ def _paste_image_in_box(
     poster.paste(resized, (x, y), resized if resized.mode == "RGBA" else None)
 
 
+def _candidate_font_paths(font_path: str | None = None) -> list[str]:
+    raw_paths = [
+        font_path,
+        os.environ.get("POSTER_FOOTER_FONT_PATH"),
+        os.environ.get("POSTER_CJK_FONT_PATH"),
+        *COMMON_CJK_FONT_PATHS,
+    ]
+    paths: list[str] = []
+    seen: set[str] = set()
+    for raw_path in raw_paths:
+        path = str(raw_path or "").strip()
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        paths.append(path)
+    return paths
+
+
+def usable_cjk_font_paths(font_path: str | None = None) -> list[str]:
+    return [path for path in _candidate_font_paths(font_path) if Path(path).is_file()]
+
+
+def _font_error_message(font_path: str | None = None) -> str:
+    checked = "；".join(_candidate_font_paths(font_path))
+    return (
+        "未找到可用中文字体，不能继续生成 footer 文案。"
+        "请安装 Windows 微软雅黑/黑体/宋体、Linux Noto Sans CJK/文泉驿等中文字体，"
+        "或设置 POSTER_CJK_FONT_PATH / POSTER_FOOTER_FONT_PATH 指向字体文件。"
+        f" 已检查：{checked}"
+    )
+
+
 def _fit_font(text: str, font_path: str, *, max_width: int, max_height: int) -> Any:
     from PIL import ImageFont
 
-    fallback_paths = [
-        font_path,
-        "/System/Library/Fonts/STHeiti Medium.ttc",
-        "/System/Library/Fonts/Supplemental/Songti.ttc",
-    ]
-    usable_paths = [path for path in fallback_paths if path]
+    usable_paths = usable_cjk_font_paths(font_path)
+    if not usable_paths:
+        raise RuntimeError(_font_error_message(font_path))
+
+    best_font: Any | None = None
+    best_score: tuple[int, int] | None = None
     for size in range(max(12, max_height), 11, -2):
         for path in usable_paths:
             try:
@@ -404,9 +462,18 @@ def _fit_font(text: str, font_path: str, *, max_width: int, max_height: int) -> 
             except OSError:
                 continue
             left, top, right, bottom = font.getbbox(text)
-            if right - left <= max_width and bottom - top <= max_height:
+            text_width = right - left
+            text_height = bottom - top
+            overflow = max(0, text_width - max_width) + max(0, text_height - max_height)
+            if overflow == 0:
                 return font
-    return ImageFont.load_default()
+            score = (overflow, -size)
+            if best_score is None or score < best_score:
+                best_font = font
+                best_score = score
+    if best_font is not None:
+        return best_font
+    raise RuntimeError(_font_error_message(font_path))
 
 
 def _draw_text_chip_logo(
@@ -732,6 +799,116 @@ def _needs_qr_background_cleanup(poster: Any, box: tuple[int, int, int, int]) ->
     return bool(sampled and light / sampled >= 0.12)
 
 
+def _barcode_box(position: Any) -> tuple[int, int, int, int] | None:
+    points = re.findall(r"(\d+)x(\d+)", str(position or ""))
+    if not points:
+        return None
+    xs = [int(x) for x, _y in points]
+    ys = [int(y) for _x, y in points]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _local_cleanup_fill(poster: Any, box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    left, top, right, bottom = box
+    width, height = poster.size
+    margin = max(8, int(max(right - left, bottom - top) * 0.18))
+    outer_left = max(0, left - margin)
+    outer_top = max(0, top - margin)
+    outer_right = min(width, right + margin)
+    outer_bottom = min(height, bottom + margin)
+    samples: list[tuple[int, int, int]] = []
+    step = max(1, max(outer_right - outer_left, outer_bottom - outer_top) // 48)
+    for y in range(outer_top, outer_bottom, step):
+        for x in range(outer_left, outer_right, step):
+            if left <= x <= right and top <= y <= bottom:
+                continue
+            r, g, b = poster.getpixel((x, y))[:3]
+            # Avoid averaging QR black modules or pure white card interiors when nearby color is available.
+            if r <= 35 and g <= 35 and b <= 35:
+                continue
+            samples.append((r, g, b))
+    if not samples:
+        return (255, 255, 255, 255)
+    r = sum(item[0] for item in samples) // len(samples)
+    g = sum(item[1] for item in samples) // len(samples)
+    b = sum(item[2] for item in samples) // len(samples)
+    return (r, g, b, 255)
+
+
+def find_existing_qr_codes(poster: Any) -> list[dict[str, Any]]:
+    try:
+        import zxingcpp
+    except ImportError:
+        return []
+
+    barcodes = zxingcpp.read_barcodes(poster.convert("RGB"))
+    items: list[dict[str, Any]] = []
+    for barcode in barcodes:
+        if str(getattr(barcode, "format", "") or "") != "QR Code":
+            continue
+        box = _barcode_box(getattr(barcode, "position", None))
+        if not box:
+            continue
+        items.append(
+            {
+                "text": str(getattr(barcode, "text", "") or ""),
+                "box_tuple": box,
+                "box": {
+                    "x": box[0],
+                    "y": box[1],
+                    "right": box[2],
+                    "bottom": box[3],
+                },
+            }
+        )
+    return items
+
+
+def _box_intersects_band(box: tuple[int, int, int, int], band: tuple[int, int]) -> bool:
+    _left, top, _right, bottom = box
+    band_top, band_bottom = band
+    return bottom >= band_top and top <= band_bottom
+
+
+def cleanup_existing_qr_codes(poster: Any, items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    from PIL import ImageDraw
+
+    if items is None:
+        items = find_existing_qr_codes(poster)
+    if not items:
+        return {"applied": False, "items": []}
+
+    draw = ImageDraw.Draw(poster)
+    cleaned_items: list[dict[str, Any]] = []
+    for item in items:
+        box = item.get("box_tuple")
+        if not box:
+            continue
+        left, top, right, bottom = box
+        pad = max(8, int(max(right - left, bottom - top) * 0.12))
+        cleanup_box = (
+            max(0, left - pad),
+            max(0, top - pad),
+            min(poster.width, right + pad),
+            min(poster.height, bottom + pad),
+        )
+        fill = _local_cleanup_fill(poster, cleanup_box)
+        radius = max(6, int(max(cleanup_box[2] - cleanup_box[0], cleanup_box[3] - cleanup_box[1]) * 0.08))
+        draw.rounded_rectangle(cleanup_box, radius=radius, fill=fill)
+        cleaned_items.append(
+            {
+                "text": str(item.get("text") or ""),
+                "box": {
+                    "x": cleanup_box[0],
+                    "y": cleanup_box[1],
+                    "right": cleanup_box[2],
+                    "bottom": cleanup_box[3],
+                },
+            }
+        )
+    return {"applied": bool(cleaned_items), "method": "cover_existing_qr_boxes", "items": cleaned_items}
+
+
 def _draw_deterministic_footer_copy(
     *,
     poster: Any,
@@ -819,8 +996,30 @@ def overlay_poster_qr(poster_path: Path, brand: dict[str, Any], template: dict[s
         return {"applied": False, "error": "template_qr_overlay_not_configured"}
 
     poster = Image.open(poster_path).convert("RGBA")
+    existing_qr_items = find_existing_qr_codes(poster)
+    source_footer_band_before_cleanup = _detect_footer_bottom_band(poster)
+    if source_footer_band_before_cleanup and any(
+        _box_intersects_band(item["box_tuple"], source_footer_band_before_cleanup)
+        for item in existing_qr_items
+        if item.get("box_tuple")
+    ):
+        original_width, _original_height = poster.size
+        footer_top, footer_bottom = source_footer_band_before_cleanup
+        poster = poster.crop((0, 0, original_width, footer_top))
+        existing_qr_cleanup = {
+            "applied": True,
+            "method": "crop_existing_footer",
+            "footer_band": source_footer_band_before_cleanup,
+            "cropped_pixels": footer_bottom - footer_top + 1,
+            "items": [
+                {key: value for key, value in item.items() if key != "box_tuple"}
+                for item in existing_qr_items
+            ],
+        }
+    else:
+        existing_qr_cleanup = cleanup_existing_qr_codes(poster, existing_qr_items)
     width, height = poster.size
-    qr_size = max(96, int(width * _ratio_value(overlay_config, "size_ratio", 0.16)))
+    qr_size = max(128, int(width * _ratio_value(overlay_config, "size_ratio", 0.16)))
     box = {
         "x": int(width * _ratio_value(overlay_config, "x_ratio", 0.78)),
         "y": int(height * _ratio_value(overlay_config, "y_ratio", 0.087)),
@@ -851,7 +1050,8 @@ def overlay_poster_qr(poster_path: Path, brand: dict[str, Any], template: dict[s
             if max_footer_height:
                 footer_height = min(footer_height, max_footer_height)
             footer_height = max(footer_height, card_size + footer_vertical_padding * 2)
-            if bool(overlay_config.get("append_footer_for_qr", False)):
+            append_footer = bool(overlay_config.get("append_footer_for_qr", True))
+            if append_footer:
                 extended = Image.new("RGBA", (width, height + footer_height), footer_fill)
                 extended.alpha_composite(poster, (0, 0))
                 poster = extended
@@ -986,6 +1186,7 @@ def overlay_poster_qr(poster_path: Path, brand: dict[str, Any], template: dict[s
             "footer_band": footer_band,
             "deterministic_footer": deterministic_footer,
             "footer": footer_result,
+            "existing_qr_cleanup": existing_qr_cleanup,
         },
     }
 
@@ -1272,7 +1473,7 @@ def compile_prompt(
             f"画幅策略：内容偏多，本次使用长海报画幅 {poster_size}。"
             "请纵向拉长海报，压缩顶部主视觉高度，扩展中部活动卡片区域；"
             "不要为了塞内容把正文缩得过小，不要遗漏可展示活动模块；"
-            "底部卖点/扫码区固定在整张海报最底部。"
+            "扫码下载 footer 会在成图下方追加，不要牺牲正文空间预留扫码底栏。"
         )
     elif layout_mode == "fixed":
         content_layout_rules = f"画幅策略：固定海报画幅 {poster_size or '9:16'}。即使内容偏多，也不要改变输出画幅。"
@@ -1289,7 +1490,7 @@ def compile_prompt(
 - 不要生成品牌 Logo。
 - 不要生成二维码、假二维码、二维码纹理或扫码图案。
 - 请保留干净的 Logo 区域，不要保留模板示例图中的占位文字、占位图标或假二维码图案。
-- 最底部 footer 由脚本重绘并贴入真实二维码；模型不要在底部生成二维码、扫码卡片、预留框、底栏 CTA 文字、图标或复杂装饰。"""
+- 扫码下载 footer 会由脚本在生成图下方追加并贴入真实二维码；模型不要生成二维码、扫码卡片、预留框、底栏 CTA 文字、图标或复杂装饰。"""
     elif asset_mode == ASSET_MODE_HYBRID:
         reference_block = (
             "参考图输入顺序：\n"
@@ -1299,8 +1500,8 @@ def compile_prompt(
         asset_rules = """Logo/二维码规则：
 - 品牌 Logo 来自第 2 张真实 Logo 参考图，作为海报品牌区的一部分自然生成，不要后贴感、不要变形、不要替换品牌字样。
 - 不要生成二维码、假二维码、二维码纹理、条形码或抽象扫码图案。
-- 最底部 footer 由脚本重绘并贴入真实二维码；模型不要在底部生成二维码、扫码卡片、预留框、底栏 CTA 文字、图标或复杂装饰。
-- 请让主要正文、卡片和表格停在底部 footer 以上；最底部只保留一条干净品牌色或浅色横条即可，横条内不要放任何需要保留的内容。"""
+- 扫码下载 footer 会由脚本在生成图下方追加并贴入真实二维码；模型不要生成二维码、扫码卡片、预留框、底栏 CTA 文字、图标或复杂装饰。
+- 请把正文、卡片和表格正常排布在当前画布内，不要为扫码区额外预留大块底栏。"""
     else:
         reference_block = (
             "参考图输入顺序：\n"
@@ -1457,6 +1658,7 @@ def run_check(template_id: str | None = None) -> dict[str, Any]:
     details: dict[str, Any] = {
         "skill_root": str(root),
         "dependencies": {},
+        "fonts": {},
         "templates": [],
         "brands": [],
     }
@@ -1469,6 +1671,14 @@ def run_check(template_id: str | None = None) -> dict[str, Any]:
             message = str(exc)
             details["dependencies"][package] = {"ok": False, "error": message}
             errors.append(f"依赖不可用：{package}: {message}")
+
+    font_paths = usable_cjk_font_paths()
+    details["fonts"] = {
+        "ok": bool(font_paths),
+        "usable_paths": font_paths,
+    }
+    if not font_paths:
+        errors.append(_font_error_message())
 
     try:
         templates = load_templates(root)
@@ -1567,6 +1777,13 @@ def print_check(result: dict[str, Any]) -> None:
             print(f"- {package}: OK")
         else:
             print(f"- {package}: FAIL ({item['error']})")
+    print()
+    print("Fonts:")
+    fonts = details.get("fonts") or {}
+    if fonts.get("ok"):
+        print(f"- CJK font: OK {fonts.get('usable_paths', [''])[0]}")
+    else:
+        print("- CJK font: FAIL")
     print()
     print("Templates:")
     for template in details["templates"]:
