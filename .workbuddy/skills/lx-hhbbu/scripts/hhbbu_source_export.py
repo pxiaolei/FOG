@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import shutil
 import sys
 from collections import defaultdict
@@ -40,9 +41,11 @@ from lx_shujuku import create_client  # noqa: E402
 
 
 Q2 = Decimal("0.01")
+IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xls"}
 WRITABLE_EXCEL_SUFFIXES = {".xlsx", ".xlsm"}
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "workspace" / "02数据导入" / "处理日志" / "lx-hhbbu"
+TARGET_TYPES = {"excel_file", "database_table"}
 TARGET_COLUMN_ALIASES = {
     "date": ("日期",),
     "city_name": ("城市名称", "城市"),
@@ -59,12 +62,16 @@ UPDATE_FIELDS = {
 
 
 @dataclass(frozen=True)
-class LocalHhdataInfo:
+class HhdataTargetInfo:
     status: str
+    target: str
     source: str
-    path: str
     message: str
+    path: str = ""
     selected_file: str = ""
+    table: str = ""
+    city_dim_table: str = ""
+    brand_dim_table: str = ""
 
 
 @dataclass(frozen=True)
@@ -174,69 +181,135 @@ def is_excel_candidate(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in EXCEL_SUFFIXES and not path.name.startswith("~$")
 
 
-def inspect_local_hhdata(
+def quote_identifier(name: str) -> str:
+    text = normalize_text(name)
+    parts = text.split(".")
+    if not text or any(not IDENTIFIER_RE.fullmatch(part) for part in parts):
+        raise ValueError(f"非法数据库标识符: {name!r}")
+    return ".".join(f"`{part}`" for part in parts)
+
+
+def dict_config(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def inspect_hhdata_target(
     *,
+    hhdata_target: str | None,
     hhdata_file: str | None,
-    require_local_hhdata: bool,
+    hhdata_table: str | None,
+    city_dim_table: str | None,
+    brand_dim_table: str | None,
+    require_hhdata_target: bool,
     config: dict[str, Any],
-) -> LocalHhdataInfo:
-    local_config = config.get("local_hhdata", {}) if isinstance(config.get("local_hhdata", {}), dict) else {}
+) -> HhdataTargetInfo:
+    local_config = dict_config(config.get("local_hhdata"))
     config_requires = bool(local_config.get("required_before_run"))
-    required = require_local_hhdata or config_requires
+    required = require_hhdata_target or config_requires
+    target = normalize_text(hhdata_target or local_config.get("target") or "excel_file")
+    failure_status = "error" if required else "warning"
+
+    if target not in TARGET_TYPES:
+        return HhdataTargetInfo(
+            status="error",
+            target=target,
+            source="fog_config.yaml:lx_hhbbu.local_hhdata.target",
+            message="hhdata target 只能是 excel_file 或 database_table",
+        )
+
+    if target == "database_table":
+        database_config = dict_config(local_config.get("database_table"))
+        table = normalize_text(hhdata_table or database_config.get("table") or local_config.get("table"))
+        city_table = normalize_text(city_dim_table or database_config.get("city_dim_table") or local_config.get("city_dim_table"))
+        brand_table = normalize_text(brand_dim_table or database_config.get("brand_dim_table") or local_config.get("brand_dim_table"))
+        if not table or not city_table or not brand_table:
+            return HhdataTargetInfo(
+                status=failure_status,
+                target=target,
+                source="fog_config.yaml:lx_hhbbu.local_hhdata.database_table",
+                message="database_table 目标必须配置 table、city_dim_table、brand_dim_table",
+                table=table,
+                city_dim_table=city_table,
+                brand_dim_table=brand_table,
+            )
+        return HhdataTargetInfo(
+            status="ok",
+            target=target,
+            source="fog_config.yaml:lx_hhbbu.local_hhdata.database_table",
+            message=f"已定位 hhdata 数据库表: {table}",
+            table=table,
+            city_dim_table=city_table,
+            brand_dim_table=brand_table,
+        )
 
     location_value: str | Path | None
     source: str
     explicit = False
+    excel_config = dict_config(local_config.get("excel_file"))
     if hhdata_file:
         location_value = hhdata_file
         source = "--hhdata-file"
         explicit = True
+    elif excel_config.get("file"):
+        location_value = excel_config.get("file")
+        source = "fog_config.yaml:lx_hhbbu.local_hhdata.excel_file.file"
     elif local_config.get("file"):
         location_value = local_config.get("file")
         source = "fog_config.yaml:lx_hhbbu.local_hhdata.file"
     else:
-        return LocalHhdataInfo(
-            status="error" if required else "warning",
-            source="fog_config.yaml:lx_hhbbu.local_hhdata.file",
-            path="",
-            message="未配置唯一 hhdata Excel 文件路径；请填写 lx_hhbbu.local_hhdata.file 或传 --hhdata-file",
+        return HhdataTargetInfo(
+            status=failure_status,
+            target=target,
+            source="fog_config.yaml:lx_hhbbu.local_hhdata.excel_file.file",
+            message="未配置唯一 hhdata Excel 文件路径；请填写 lx_hhbbu.local_hhdata.excel_file.file 或传 --hhdata-file",
         )
 
     path = resolve_runtime_path(location_value)
     failure_status = "error" if required or explicit else "warning"
 
     if is_excel_candidate(path):
-        return LocalHhdataInfo(
+        return HhdataTargetInfo(
             status="ok",
+            target=target,
             source=source,
             path=str(path),
             message=f"已定位唯一本地 hhdata Excel: {path}",
             selected_file=str(path),
         )
-    return LocalHhdataInfo(
+    return HhdataTargetInfo(
         status=failure_status,
+        target=target,
         source=source,
         path=str(path),
         message=f"未找到可用本地 hhdata Excel: {path}",
     )
 
 
-def local_hhdata_to_dict(info: LocalHhdataInfo) -> dict[str, Any]:
+def hhdata_target_to_dict(info: HhdataTargetInfo) -> dict[str, Any]:
     return {
         "status": info.status,
+        "target": info.target,
         "source": info.source,
         "path": info.path,
         "message": info.message,
         "selected_file": info.selected_file,
+        "table": info.table,
+        "city_dim_table": info.city_dim_table,
+        "brand_dim_table": info.brand_dim_table,
     }
 
 
-def print_local_hhdata_info(info: LocalHhdataInfo) -> None:
+def print_hhdata_target_info(info: HhdataTargetInfo) -> None:
     prefix = {"ok": "[ok]", "warning": "[warning]", "error": "[error]"}.get(info.status, "[info]")
-    print(f"{prefix} 本地 hhdata 定位: {info.message}")
+    print(f"{prefix} hhdata 写回目标: {info.message}")
+    print(f"目标类型: {info.target}")
     print(f"来源: {info.source}")
     if info.selected_file:
         print(f"写回文件: {info.selected_file}")
+    if info.table:
+        print(f"写回表: {info.table}")
+        print(f"城市维表: {info.city_dim_table}")
+        print(f"品牌维表: {info.brand_dim_table}")
 
 
 def find_header(headers: dict[str, int], field: str) -> int | None:
@@ -283,23 +356,25 @@ def make_backup(file_path: Path, backup_dir: Path) -> Path:
 def build_hhdata_update(
     *,
     source: dict[Key, SourceAmounts],
-    local_hhdata: LocalHhdataInfo,
+    hhdata_target: HhdataTargetInfo,
     output_dir: Path,
     sheet_name: str = "",
     backup_dir: str = "",
     confirmed: bool = False,
 ) -> dict[str, Any]:
-    if not local_hhdata.selected_file:
+    if not hhdata_target.selected_file:
         return {
             "status": "error",
-            "message": "未能唯一定位要写回的 hhdata Excel；请用 --hhdata-file 或 lx_hhbbu.local_hhdata.file 指定单个文件",
+            "target": "excel_file",
+            "message": "未能唯一定位要写回的 hhdata Excel；请用 --hhdata-file 或 lx_hhbbu.local_hhdata.excel_file.file 指定单个文件",
             "confirmed": confirmed,
         }
 
-    file_path = Path(local_hhdata.selected_file)
+    file_path = Path(hhdata_target.selected_file)
     if file_path.suffix.lower() not in WRITABLE_EXCEL_SUFFIXES:
         return {
             "status": "error",
+            "target": "excel_file",
             "message": f"当前只支持写回 .xlsx/.xlsm 文件，不支持: {file_path}",
             "confirmed": confirmed,
         }
@@ -385,6 +460,7 @@ def build_hhdata_update(
         status = "updated" if confirmed and changes else "no_changes" if not changes else "dry_run"
         return {
             "status": status,
+            "target": "excel_file",
             "mode": mode,
             "confirmed": confirmed,
             "message": "已写回本地 hhdata Excel" if confirmed and changes else "未保存 Excel；这是 dry-run 更新计划" if changes else "没有需要写回的单元格",
@@ -410,6 +486,202 @@ def build_hhdata_update(
         }
     finally:
         workbook.close()
+
+
+def build_database_update(
+    *,
+    source: dict[Key, SourceAmounts],
+    hhdata_target: HhdataTargetInfo,
+    confirmed: bool = False,
+) -> dict[str, Any]:
+    source_keys = {key for key, amounts in source.items() if amounts.has_nonzero_target_amount}
+    if not source_keys:
+        return {
+            "status": "no_changes",
+            "target": "database_table",
+            "mode": "confirmed" if confirmed else "dry_run",
+            "confirmed": confirmed,
+            "message": "公司源没有可写回的非零金额",
+            "table": hhdata_target.table,
+            "changed_row_count": 0,
+            "changed_cell_count": 0,
+        }
+
+    try:
+        table = quote_identifier(hhdata_target.table)
+        city_dim_table = quote_identifier(hhdata_target.city_dim_table)
+        brand_dim_table = quote_identifier(hhdata_target.brand_dim_table)
+    except ValueError as exc:
+        return {
+            "status": "error",
+            "target": "database_table",
+            "mode": "confirmed" if confirmed else "dry_run",
+            "confirmed": confirmed,
+            "message": str(exc),
+            "table": hhdata_target.table,
+        }
+
+    start_day = min(key.date_day for key in source_keys)
+    end_day = max(key.date_day for key in source_keys)
+    select_sql = f"""
+        SELECT
+            f.id,
+            DATE_FORMAT(f.date_day, '%%Y-%%m-%%d') AS date_day,
+            f.city_id,
+            c.city_name,
+            f.brand_id,
+            b.brand_name,
+            f.total_b_subsidy,
+            f.merchant_b_subsidy,
+            f.card_merchant_income
+        FROM {table} f
+        LEFT JOIN {city_dim_table} c ON f.city_id = c.city_id
+        LEFT JOIN {brand_dim_table} b ON f.brand_id = b.brand_id
+        WHERE f.date_day BETWEEN %s AND %s
+    """
+    update_sql = f"""
+        UPDATE {table}
+        SET total_b_subsidy = %s,
+            merchant_b_subsidy = %s,
+            card_merchant_income = %s
+        WHERE id = %s
+    """
+
+    try:
+        from lxx_share.database import DatabaseConnector  # noqa: PLC0415
+
+        db = DatabaseConnector()
+        with db.connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(select_sql, [start_day, end_day])
+            columns = [desc[0] for desc in cursor.description or []]
+            local_rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+            rows_by_key: dict[Key, list[dict[str, Any]]] = defaultdict(list)
+            row_meta: dict[Any, Key] = {}
+            row_by_id: dict[Any, dict[str, Any]] = {}
+            for row in local_rows:
+                date_day = normalize_date(row.get("date_day"))
+                city_name = normalize_text(row.get("city_name"))
+                brand_name = normalize_text(row.get("brand_name"))
+                row_id = row.get("id")
+                if not row_id or not date_day or not city_name or not brand_name:
+                    continue
+                key = Key(date_day, city_name, brand_name)
+                rows_by_key[key].append(row)
+                row_meta[row_id] = key
+                row_by_id[row_id] = row
+
+            duplicate_keys = {key for key, rows in rows_by_key.items() if len(rows) > 1}
+            changed_row_ids: set[Any] = set()
+            unchanged_rows = 0
+            missing_source_rows = []
+            skipped_duplicate_rows = []
+            changes = []
+            row_updates: dict[Any, dict[str, Decimal]] = {}
+
+            for row_id, key in sorted(row_meta.items(), key=lambda item: (item[1].date_day, item[1].city_name, item[1].brand_name, str(item[0]))):
+                row = row_by_id[row_id]
+                if key in duplicate_keys:
+                    skipped_duplicate_rows.append({
+                        "id": row_id,
+                        "date": key.date_day,
+                        "city_name": key.city_name,
+                        "brand_name": key.brand_name,
+                        "reason": "数据库表存在重复 date+city_name+brand_name，跳过避免重复写入",
+                    })
+                    continue
+                amounts = source.get(key)
+                if amounts is None or not amounts.has_nonzero_target_amount:
+                    missing_source_rows.append({
+                        "id": row_id,
+                        "date": key.date_day,
+                        "city_name": key.city_name,
+                        "brand_name": key.brand_name,
+                    })
+                    continue
+
+                update_values = source_update_values(amounts)
+                row_changed = False
+                for field, display_name in UPDATE_FIELDS.items():
+                    old_value = money(row.get(field))
+                    new_value = update_values[field]
+                    if old_value == new_value:
+                        continue
+                    row_changed = True
+                    changed_row_ids.add(row_id)
+                    changes.append({
+                        "id": row_id,
+                        "date": key.date_day,
+                        "city_name": key.city_name,
+                        "brand_name": key.brand_name,
+                        "field": field,
+                        "column": display_name,
+                        "old_value": fmt_money(old_value),
+                        "new_value": fmt_money(new_value),
+                    })
+                if row_changed:
+                    row_updates[row_id] = update_values
+                else:
+                    unchanged_rows += 1
+
+            updated_row_count = 0
+            if confirmed and row_updates:
+                for row_id, values in row_updates.items():
+                    cursor.execute(
+                        update_sql,
+                        [
+                            values["total_b_subsidy"],
+                            values["merchant_b_subsidy"],
+                            values["card_merchant_income"],
+                            row_id,
+                        ],
+                    )
+                    updated_row_count += cursor.rowcount
+                conn.commit()
+            else:
+                conn.rollback()
+
+        local_unique_keys = {key for key, rows in rows_by_key.items() if len(rows) == 1}
+        source_not_in_local = sorted(source_keys - local_unique_keys, key=lambda key: (key.date_day, key.city_name, key.brand_name))
+        mode = "confirmed" if confirmed else "dry_run"
+        status = "updated" if confirmed and changes else "no_changes" if not changes else "dry_run"
+        return {
+            "status": status,
+            "target": "database_table",
+            "mode": mode,
+            "confirmed": confirmed,
+            "message": "已写回 hhdata 数据库表" if confirmed and changes else "未写数据库；这是 dry-run 更新计划" if changes else "没有需要写回的数据库行",
+            "table": hhdata_target.table,
+            "city_dim_table": hhdata_target.city_dim_table,
+            "brand_dim_table": hhdata_target.brand_dim_table,
+            "date_range": {"start": start_day, "end": end_day},
+            "local_key_count": len(rows_by_key),
+            "duplicate_local_key_count": len(duplicate_keys),
+            "skipped_duplicate_row_count": len(skipped_duplicate_rows),
+            "missing_source_row_count": len(missing_source_rows),
+            "source_not_in_local_count": len(source_not_in_local),
+            "changed_row_count": len(changed_row_ids),
+            "changed_cell_count": len(changes),
+            "updated_row_count": updated_row_count,
+            "unchanged_matched_row_count": unchanged_rows,
+            "changes_sample": changes[:200],
+            "skipped_duplicate_rows_sample": skipped_duplicate_rows[:50],
+            "missing_source_rows_sample": missing_source_rows[:50],
+            "source_not_in_local_sample": [
+                {"date": key.date_day, "city_name": key.city_name, "brand_name": key.brand_name}
+                for key in source_not_in_local[:50]
+            ],
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "target": "database_table",
+            "mode": "confirmed" if confirmed else "dry_run",
+            "confirmed": confirmed,
+            "message": f"数据库写回失败: {exc}",
+            "table": hhdata_target.table,
+        }
 
 
 def fetch_source(dates: list[str], source_limit: int) -> tuple[dict[Key, SourceAmounts], dict[str, Any]]:
@@ -550,25 +822,31 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- 输出行数: {report['row_count']}",
         f"- CSV: `{report['outputs']['csv']}`",
         "",
-        "## 本地 hhdata 定位",
+        "## hhdata 写回目标",
         "",
-        f"- 状态: `{report['local_hhdata']['status']}`",
-        f"- 来源: `{report['local_hhdata']['source']}`",
-        f"- 路径: `{report['local_hhdata']['path']}`",
-        f"- 说明: {report['local_hhdata']['message']}",
+        f"- 状态: `{report['hhdata_target']['status']}`",
+        f"- 目标类型: `{report['hhdata_target']['target']}`",
+        f"- 来源: `{report['hhdata_target']['source']}`",
+        f"- 路径: `{report['hhdata_target']['path']}`",
+        f"- 表: `{report['hhdata_target']['table']}`",
+        f"- 说明: {report['hhdata_target']['message']}",
         "",
     ]
-    if report.get("workbook_update"):
-        update = report["workbook_update"]
+    if report.get("target_update"):
+        update = report["target_update"]
+        heading = "本地 hhdata Excel 写回" if update.get("target") == "excel_file" else "hhdata 数据库表写回"
         lines.extend([
-            "## 本地 hhdata Excel 写回",
+            f"## {heading}",
             "",
             f"- 状态: `{update['status']}`",
             f"- 模式: `{update['mode']}`",
+            f"- 目标类型: `{update.get('target', '')}`",
             f"- 文件: `{update.get('file', '')}`",
+            f"- 表: `{update.get('table', '')}`",
             f"- 工作表: `{update.get('sheet', '')}`",
             f"- 变更行数: {update.get('changed_row_count', 0)}",
             f"- 变更单元格数: {update.get('changed_cell_count', 0)}",
+            f"- 数据库已更新行数: {update.get('updated_row_count', 0)}",
             f"- 跳过重复 key 行数: {update.get('skipped_duplicate_row_count', 0)}",
             f"- 本地无公司源行数: {update.get('missing_source_row_count', 0)}",
             f"- 公司源未命中本地 key 数: {update.get('source_not_in_local_count', 0)}",
@@ -608,11 +886,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-date", type=parse_date, help="开始日期 YYYY-MM-DD")
     parser.add_argument("--end-date", type=parse_date, help="结束日期 YYYY-MM-DD")
     parser.add_argument("--source-limit", type=int, default=source_limit, help="公司库单日聚合查询 LIMIT，默认 1000")
+    parser.add_argument("--hhdata-target", choices=sorted(TARGET_TYPES), help="hhdata 写回目标类型；优先于 fog_config.yaml")
     parser.add_argument("--hhdata-file", help="本地 hhdata Excel 文件路径；优先于 fog_config.yaml")
-    parser.add_argument("--require-local-hhdata", action="store_true", help="找不到本地 hhdata Excel 时失败")
-    parser.add_argument("--check-local-hhdata", action="store_true", help="只检查本地 hhdata 位置，不查询公司库")
-    parser.add_argument("--update-hhdata", action="store_true", help="按公司源生成本地 hhdata Excel 三列写回计划；默认不保存")
-    parser.add_argument("--confirmed", action="store_true", help="确认保存本地 hhdata Excel；必须和 --update-hhdata 一起使用")
+    parser.add_argument("--hhdata-table", help="hhdata 数据库事实表；target=database_table 时优先于 fog_config.yaml")
+    parser.add_argument("--city-dim-table", help="城市维表；target=database_table 时优先于 fog_config.yaml")
+    parser.add_argument("--brand-dim-table", help="品牌维表；target=database_table 时优先于 fog_config.yaml")
+    parser.add_argument("--require-local-hhdata", action="store_true", help="找不到 hhdata 写回目标时失败")
+    parser.add_argument("--check-local-hhdata", action="store_true", help="只检查 hhdata 写回目标，不查询公司库")
+    parser.add_argument("--update-hhdata", action="store_true", help="按公司源生成 hhdata 三列写回计划；默认不保存")
+    parser.add_argument("--confirmed", action="store_true", help="确认保存 hhdata 写回；必须和 --update-hhdata 一起使用")
     parser.add_argument("--hhdata-sheet", help="本地 hhdata 工作表名称；默认自动检测")
     parser.add_argument("--backup-dir", help="确认写回前的备份目录；默认写到输出目录 backups 子目录")
     parser.add_argument(
@@ -623,58 +905,77 @@ def parse_args() -> argparse.Namespace:
     output_dir = args.output_dir or config.get("output_dir") or DEFAULT_OUTPUT_DIR
     args.output_dir = str(resolve_runtime_path(output_dir))
     args.hhbbu_config = config
-    local_config = config.get("local_hhdata", {}) if isinstance(config.get("local_hhdata", {}), dict) else {}
-    args.hhdata_sheet = args.hhdata_sheet or local_config.get("sheet_name") or ""
-    args.backup_dir = args.backup_dir or local_config.get("backup_dir") or ""
+    local_config = dict_config(config.get("local_hhdata"))
+    excel_config = dict_config(local_config.get("excel_file"))
+    args.hhdata_target = args.hhdata_target or local_config.get("target") or "excel_file"
+    args.hhdata_sheet = args.hhdata_sheet or excel_config.get("sheet_name") or local_config.get("sheet_name") or ""
+    args.backup_dir = args.backup_dir or excel_config.get("backup_dir") or local_config.get("backup_dir") or ""
     if args.confirmed and not args.update_hhdata:
         parser.error("--confirmed 必须和 --update-hhdata 一起使用")
     if not args.check_local_hhdata and (not args.start_date or not args.end_date):
-        parser.error("导出公司源时必须同时提供 --start-date 和 --end-date；只检查本地 hhdata 位置可使用 --check-local-hhdata")
+        parser.error("导出公司源时必须同时提供 --start-date 和 --end-date；只检查 hhdata 写回目标可使用 --check-local-hhdata")
     return args
 
 
 def main() -> int:
     args = parse_args()
-    local_hhdata = inspect_local_hhdata(
+    hhdata_target = inspect_hhdata_target(
+        hhdata_target=args.hhdata_target,
         hhdata_file=args.hhdata_file,
-        require_local_hhdata=args.require_local_hhdata or args.update_hhdata,
+        hhdata_table=args.hhdata_table,
+        city_dim_table=args.city_dim_table,
+        brand_dim_table=args.brand_dim_table,
+        require_hhdata_target=args.require_local_hhdata or args.update_hhdata,
         config=args.hhbbu_config,
     )
     if args.check_local_hhdata:
-        print_local_hhdata_info(local_hhdata)
-        return 1 if local_hhdata.status == "error" else 0
-    if local_hhdata.status == "error":
-        print_local_hhdata_info(local_hhdata)
+        print_hhdata_target_info(hhdata_target)
+        return 1 if hhdata_target.status == "error" else 0
+    if hhdata_target.status == "error":
+        print_hhdata_target_info(hhdata_target)
         return 1
 
     dates = iter_dates(args.start_date, args.end_date)
     source, source_meta = fetch_source(dates, args.source_limit)
-    source_meta["local_hhdata"] = local_hhdata_to_dict(local_hhdata)
+    source_meta["hhdata_target"] = hhdata_target_to_dict(hhdata_target)
     rows = build_rows(source)
     source_summary = summarize_by_date(source, dates)
     workbook_update = None
+    target_update = None
     if args.update_hhdata:
-        workbook_update = build_hhdata_update(
-            source=source,
-            local_hhdata=local_hhdata,
-            output_dir=Path(args.output_dir),
-            sheet_name=args.hhdata_sheet,
-            backup_dir=args.backup_dir,
-            confirmed=args.confirmed,
-        )
-        if workbook_update.get("status") == "error":
-            print(f"[error] 本地 hhdata Excel 写回失败: {workbook_update.get('message', '')}")
+        if hhdata_target.target == "excel_file":
+            target_update = build_hhdata_update(
+                source=source,
+                hhdata_target=hhdata_target,
+                output_dir=Path(args.output_dir),
+                sheet_name=args.hhdata_sheet,
+                backup_dir=args.backup_dir,
+                confirmed=args.confirmed,
+            )
+            workbook_update = target_update
+        else:
+            target_update = build_database_update(
+                source=source,
+                hhdata_target=hhdata_target,
+                confirmed=args.confirmed,
+            )
+        if target_update.get("status") == "error":
+            print(f"[error] hhdata 写回失败: {target_update.get('message', '')}")
             return 1
     report = {
         "type": "lx-hhbbu.source_export",
-        "version": 2,
+        "version": 3,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "args": {
             "start_date": dates[0],
             "end_date": dates[-1],
             "source_limit": args.source_limit,
             "output_dir": args.output_dir,
+            "hhdata_target": args.hhdata_target,
             "hhdata_file": args.hhdata_file,
+            "hhdata_table": args.hhdata_table,
+            "city_dim_table": args.city_dim_table,
+            "brand_dim_table": args.brand_dim_table,
             "require_local_hhdata": args.require_local_hhdata,
             "update_hhdata": args.update_hhdata,
             "confirmed": args.confirmed,
@@ -683,7 +984,9 @@ def main() -> int:
         },
         "date_range": {"start": dates[0], "end": dates[-1], "days": len(dates)},
         "key": ["date", "city_name", "brand_name"],
-        "local_hhdata": local_hhdata_to_dict(local_hhdata),
+        "hhdata_target": hhdata_target_to_dict(hhdata_target),
+        "local_hhdata": hhdata_target_to_dict(hhdata_target),
+        "target_update": target_update,
         "workbook_update": workbook_update,
         "source_meta": source_meta,
         "source_summary": source_summary,
@@ -703,16 +1006,19 @@ def main() -> int:
             f"商家b补={values['merchant_b_subsidy']} "
             f"售卡商家收入={values['card_merchant_income']}"
         )
-    print_local_hhdata_info(local_hhdata)
-    if workbook_update:
-        print("本地 hhdata Excel 写回:")
-        print(f"- 状态: {workbook_update['status']}")
-        print(f"- 模式: {workbook_update['mode']}")
-        print(f"- 变更行数: {workbook_update.get('changed_row_count', 0)}")
-        print(f"- 变更单元格数: {workbook_update.get('changed_cell_count', 0)}")
-        if workbook_update.get("backup_path"):
-            print(f"- 备份: {workbook_update['backup_path']}")
-        print(f"- 说明: {workbook_update.get('message', '')}")
+    print_hhdata_target_info(hhdata_target)
+    if target_update:
+        print("hhdata 写回:")
+        print(f"- 目标类型: {target_update.get('target', '')}")
+        print(f"- 状态: {target_update['status']}")
+        print(f"- 模式: {target_update['mode']}")
+        print(f"- 变更行数: {target_update.get('changed_row_count', 0)}")
+        print(f"- 变更单元格数: {target_update.get('changed_cell_count', 0)}")
+        if target_update.get("updated_row_count"):
+            print(f"- 数据库已更新行数: {target_update['updated_row_count']}")
+        if target_update.get("backup_path"):
+            print(f"- 备份: {target_update['backup_path']}")
+        print(f"- 说明: {target_update.get('message', '')}")
     print(f"CSV: {csv_path}")
     print(f"审计 JSON: {json_path}")
     print(f"审计 Markdown: {md_path}")

@@ -68,17 +68,23 @@ lx_shujuku:
 
 # ============================================================
 # lx_hhbbu
-# 要配置什么：hhdata B补来源查询、审计输出目录，以及同事本机 hhdata Excel 写回位置。
-# 说明：lx-hhbbu 查询公司 dataReporting 后，按 date + city_name + brand_name 写回本地 hhdata Excel 的三列；不连接本地 RDS、不写数据库。
-# 用法：必须填写唯一 hhdata Excel 文件路径 file；不从目录自动猜测文件。
+# 要配置什么：hhdata B补来源查询、审计输出目录，以及 hhdata 写回目标。
+# 说明：target 支持 excel_file 或 database_table。excel_file 写回唯一 hhdata Excel；database_table 写回数据库事实表。
+# 用法：target=excel_file 时必须填写唯一 hhdata Excel 文件路径；target=database_table 时必须配置 table。
 # ============================================================
 lx_hhbbu:
   output_dir: "workspace/02数据导入/处理日志/lx-hhbbu"
   local_hhdata:
-    file: ""
-    sheet_name: ""
-    backup_dir: "workspace/02数据导入/处理日志/lx-hhbbu/backups"
+    target: "excel_file"
     required_before_run: true
+    excel_file:
+      file: ""
+      sheet_name: ""
+      backup_dir: "workspace/02数据导入/处理日志/lx-hhbbu/backups"
+    database_table:
+      table: "hhdata__fact_daily_metrics"
+      city_dim_table: "mabiao__dim_cities"
+      brand_dim_table: "mabiao__dim_brands"
 
 # ============================================================
 # lx_zhutichaibiao

@@ -132,8 +132,13 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
     if isinstance(hhbbu, dict):
         dirs.append(resolve_path(hhbbu.get("output_dir"), "workspace/02数据导入/处理日志/lx-hhbbu"))
         local_hhdata = hhbbu.get("local_hhdata", {})
-        if isinstance(local_hhdata, dict) and local_hhdata.get("backup_dir"):
-            dirs.append(resolve_path(local_hhdata.get("backup_dir")))
+        if isinstance(local_hhdata, dict):
+            excel_config = local_hhdata.get("excel_file", {})
+            if not isinstance(excel_config, dict):
+                excel_config = {}
+            backup_dir = excel_config.get("backup_dir") or local_hhdata.get("backup_dir")
+            if backup_dir:
+                dirs.append(resolve_path(backup_dir))
 
     haibao = config.get("lx_haibao", {})
     if isinstance(haibao, dict):
@@ -317,15 +322,36 @@ def cmd_check(_: argparse.Namespace) -> int:
             local_hhdata = {}
         require_local = bool(local_hhdata.get("required_before_run"))
         severity = "error" if require_local else "warning"
-        configured_file = str(local_hhdata.get("file") or "").strip()
-        if configured_file:
-            path = resolve_path(configured_file)
-            if is_excel_candidate(path):
-                add_check(items, "ok", "lx_hhbbu.local_hhdata.file", f"已找到 Excel: {path}")
+        target = str(local_hhdata.get("target") or "excel_file").strip()
+        if target not in ("excel_file", "database_table"):
+            add_check(items, "error", "lx_hhbbu.local_hhdata.target", "只能是 excel_file 或 database_table")
+        elif target == "excel_file":
+            excel_config = local_hhdata.get("excel_file", {})
+            if not isinstance(excel_config, dict):
+                excel_config = {}
+            configured_file = str(excel_config.get("file") or local_hhdata.get("file") or "").strip()
+            if configured_file:
+                path = resolve_path(configured_file)
+                if is_excel_candidate(path):
+                    add_check(items, "ok", "lx_hhbbu.local_hhdata.excel_file.file", f"已找到 Excel: {path}")
+                else:
+                    add_check(items, severity, "lx_hhbbu.local_hhdata.excel_file.file", f"未找到可用 Excel: {path}")
             else:
-                add_check(items, severity, "lx_hhbbu.local_hhdata.file", f"未找到可用 Excel: {path}")
+                add_check(items, severity, "lx_hhbbu.local_hhdata.excel_file.file", "未配置唯一 hhdata Excel 文件路径")
         else:
-            add_check(items, severity, "lx_hhbbu.local_hhdata.file", "未配置唯一 hhdata Excel 文件路径")
+            database_table = local_hhdata.get("database_table", {})
+            if not isinstance(database_table, dict):
+                database_table = {}
+            database_config = config.get("database", {})
+            if not isinstance(database_config, dict):
+                database_config = {}
+            required(items, "database.host", database_config.get("host"), "error")
+            required(items, "database.database", database_config.get("database"), "error")
+            required(items, "database.user", database_config.get("user"), "error")
+            required(items, "database.password", database_config.get("password"), "error")
+            required(items, "lx_hhbbu.local_hhdata.database_table.table", database_table.get("table"), severity)
+            required(items, "lx_hhbbu.local_hhdata.database_table.city_dim_table", database_table.get("city_dim_table"), severity)
+            required(items, "lx_hhbbu.local_hhdata.database_table.brand_dim_table", database_table.get("brand_dim_table"), severity)
 
     if enabled.get("lx_nongfu"):
         nongfu = config.get("lx_nongfu", {}) or {}
