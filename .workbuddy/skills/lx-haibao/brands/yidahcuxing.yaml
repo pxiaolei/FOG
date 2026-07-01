@@ -20,6 +20,7 @@ logo_overlay:
 display:
   poster_brand_name: "易达出行"
   forbidden_brand_text: []
+  footer_color: "#D90E26"
 
 output:
   filename_template: "{brand}-{city}-{timestamp}.png"

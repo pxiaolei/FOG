@@ -50,6 +50,7 @@ Windows 使用同名 `.cmd` 入口：`check_runtime.cmd`、`haibao.cmd`。
 - 未传 `--confirmed` 时，不生成样图或成品。
 - 普通用户不要使用 `--template` 覆盖模板；管理员临时测试模板时必须同时追加 `--admin-template-override`。
 - 默认资产模式为 `hybrid`：模型必须按“模板图 -> 真实 Logo”的参考图顺序生成海报主体，二维码由脚本贴入真实素材并验真。
+- 默认 `bottom_right` 扫码区由脚本重绘整条 footer 后再贴真实二维码；模型不要生成底部二维码、预留框、扫码卡片或 footer CTA 文案。
 - 二维码验证失败时废弃该图，在同一 provider 上按二维码原样使用要求重试；同事共享默认不配置跨 provider fallback。
 - `--asset-mode integrated` 仅用于内部对比，让模型同时参考模板、Logo、二维码；`--asset-mode overlay` 是旧版脚本贴 Logo/二维码兜底，不作为默认正式链路。
 - TXT 是活动内容真源；TXT 没有的模块不展示，不写“暂无”。

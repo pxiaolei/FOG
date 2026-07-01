@@ -326,6 +326,33 @@ def _ratio_value(config: dict[str, Any], key: str, default: float) -> float:
         return default
 
 
+def _rgba_from_hex(value: Any) -> tuple[int, int, int, int] | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("#"):
+        raw = raw[1:]
+    if len(raw) == 3:
+        raw = "".join(item * 2 for item in raw)
+    if len(raw) != 6:
+        return None
+    try:
+        r = int(raw[0:2], 16)
+        g = int(raw[2:4], 16)
+        b = int(raw[4:6], 16)
+    except ValueError:
+        return None
+    return (r, g, b, 255)
+
+
+def _footer_fill_from_config(brand: dict[str, Any], overlay_config: dict[str, Any]) -> tuple[int, int, int, int] | None:
+    configured = _rgba_from_hex(overlay_config.get("footer_color") or overlay_config.get("footer_fill"))
+    if configured:
+        return configured
+    display = brand.get("display") if isinstance(brand.get("display"), dict) else {}
+    return _rgba_from_hex(display.get("footer_color"))
+
+
 def _paste_image_in_box(
     *,
     poster: Any,
@@ -705,6 +732,73 @@ def _needs_qr_background_cleanup(poster: Any, box: tuple[int, int, int, int]) ->
     return bool(sampled and light / sampled >= 0.12)
 
 
+def _draw_deterministic_footer_copy(
+    *,
+    poster: Any,
+    brand: dict[str, Any],
+    overlay_config: dict[str, Any],
+    footer_band: tuple[int, int],
+    qr_left: int,
+    footer_fill: tuple[int, int, int, int],
+) -> dict[str, Any]:
+    from PIL import ImageDraw
+
+    width, height = poster.size
+    footer_top, footer_bottom = footer_band
+    footer_height = footer_bottom - footer_top + 1
+    left_margin = max(18, int(width * _ratio_value(overlay_config, "footer_left_margin_ratio", 0.065)))
+    text_right = max(left_margin, qr_left - max(18, int(width * _ratio_value(overlay_config, "footer_qr_gap_ratio", 0.045))))
+    max_text_width = max(1, text_right - left_margin)
+    if max_text_width < int(width * 0.24):
+        return {"applied": False, "reason": "footer_text_area_too_narrow"}
+
+    font_path = str(overlay_config.get("footer_font_path") or "/System/Library/Fonts/STHeiti Medium.ttc")
+    title = str(overlay_config.get("footer_title") or "扫码下载司机端")
+    subtitle = str(overlay_config.get("footer_subtitle") or "了解更多活动福利")
+    note = str(overlay_config.get("footer_note") or "*最终解释权归平台所有")
+
+    title_font = _fit_font(title, font_path, max_width=max_text_width, max_height=max(20, int(footer_height * 0.25)))
+    subtitle_font = _fit_font(subtitle, font_path, max_width=max_text_width, max_height=max(16, int(footer_height * 0.2)))
+    note_font = _fit_font(note, font_path, max_width=max_text_width, max_height=max(10, int(footer_height * 0.105)))
+
+    draw = ImageDraw.Draw(poster)
+    r, g, b, _alpha = footer_fill
+    # Use high-contrast text on dark/saturated brand footers and dark text on rare light footers.
+    is_light_footer = (r * 299 + g * 587 + b * 114) / 1000 > 178
+    title_color = (25, 38, 58, 255) if is_light_footer else (255, 255, 255, 255)
+    subtitle_color = (0, 106, 255, 255) if is_light_footer else (255, 242, 66, 255)
+    note_color = (65, 76, 92, 230) if is_light_footer else (255, 255, 255, 220)
+
+    title_box = draw.textbbox((0, 0), title, font=title_font)
+    subtitle_box = draw.textbbox((0, 0), subtitle, font=subtitle_font)
+    note_box = draw.textbbox((0, 0), note, font=note_font)
+    title_h = title_box[3] - title_box[1]
+    subtitle_h = subtitle_box[3] - subtitle_box[1]
+    note_h = note_box[3] - note_box[1]
+    gap = max(6, int(footer_height * 0.045))
+    content_h = title_h + subtitle_h + note_h + gap * 2
+    y = footer_top + max(10, int((footer_height - content_h) / 2))
+
+    draw.text((left_margin, y), title, font=title_font, fill=title_color)
+    y += title_h + gap
+    draw.text((left_margin, y), subtitle, font=subtitle_font, fill=subtitle_color)
+    note_y = min(footer_bottom - note_h - max(6, int(footer_height * 0.08)), y + subtitle_h + gap)
+    draw.text((left_margin, note_y), note, font=note_font, fill=note_color)
+
+    return {
+        "applied": True,
+        "title": title,
+        "subtitle": subtitle,
+        "note": note,
+        "text_box": {
+            "x": left_margin,
+            "y": footer_top,
+            "right": text_right,
+            "bottom": footer_bottom,
+        },
+    }
+
+
 def overlay_poster_qr(poster_path: Path, brand: dict[str, Any], template: dict[str, Any]) -> dict[str, Any]:
     from PIL import Image, ImageDraw, ImageFilter
 
@@ -741,9 +835,35 @@ def overlay_poster_qr(poster_path: Path, brand: dict[str, Any], template: dict[s
     anchor = str(overlay_config.get("anchor") or "").strip().lower()
     right_margin = max(12, int(width * _ratio_value(overlay_config, "right_margin_ratio", 0.035)))
     bottom_margin = max(12, int(width * _ratio_value(overlay_config, "bottom_margin_ratio", 0.035)))
+    deterministic_footer = bool(overlay_config.get("deterministic_footer", anchor == "bottom_right"))
+    footer_result: dict[str, Any] = {"applied": False}
     if anchor == "bottom_right":
-        if bool(overlay_config.get("append_footer_for_qr", False)):
-            footer_band = _detect_footer_bottom_band(poster)
+        source_footer_band = _detect_footer_bottom_band(poster)
+        if deterministic_footer:
+            footer_fill = _footer_fill_from_config(brand, overlay_config) or _footer_blue_fill(poster, source_footer_band)
+            top_clearance = max(8, int(card_size * _ratio_value(overlay_config, "footer_top_clearance_ratio", 0.08)))
+            footer_vertical_padding = max(top_clearance, bottom_margin)
+            footer_height = max(
+                int(width * _ratio_value(overlay_config, "footer_height_ratio", 0.26)),
+                card_size + footer_vertical_padding * 2,
+            )
+            max_footer_height = int(height * _ratio_value(overlay_config, "footer_max_height_ratio", 0.22))
+            if max_footer_height:
+                footer_height = min(footer_height, max_footer_height)
+            footer_height = max(footer_height, card_size + footer_vertical_padding * 2)
+            if bool(overlay_config.get("append_footer_for_qr", False)):
+                extended = Image.new("RGBA", (width, height + footer_height), footer_fill)
+                extended.alpha_composite(poster, (0, 0))
+                poster = extended
+                footer_band = (height, height + footer_height - 1)
+                height = height + footer_height
+            else:
+                footer_height = min(footer_height, height)
+                footer_band = (height - footer_height, height - 1)
+            footer_draw = ImageDraw.Draw(poster)
+            footer_draw.rectangle((0, footer_band[0], width, height), fill=footer_fill)
+        elif bool(overlay_config.get("append_footer_for_qr", False)):
+            footer_band = source_footer_band
             top_clearance = max(8, int(card_size * _ratio_value(overlay_config, "footer_top_clearance_ratio", 0.08)))
             footer_height = top_clearance + card_size + bottom_margin
             extended = Image.new("RGBA", (width, height + footer_height), _footer_blue_fill(poster, footer_band))
@@ -752,7 +872,7 @@ def overlay_poster_qr(poster_path: Path, brand: dict[str, Any], template: dict[s
             footer_band = (height, height + footer_height - 1)
             height = height + footer_height
         elif bool(overlay_config.get("ensure_footer_min_height", True)):
-            footer_band = _detect_footer_bottom_band(poster)
+            footer_band = source_footer_band
             if footer_band:
                 footer_top, _footer_bottom = footer_band
                 top_clearance = max(8, int(card_size * _ratio_value(overlay_config, "footer_top_clearance_ratio", 0.08)))
@@ -765,7 +885,21 @@ def overlay_poster_qr(poster_path: Path, brand: dict[str, Any], template: dict[s
                     height = height + extra_height
                     footer_band = (footer_top, height - 1)
         card_x = max(0, min(width - right_margin - card_size, width - card_size))
-        card_y = max(0, min(height - bottom_margin - card_size, height - card_size))
+        if deterministic_footer and footer_band:
+            footer_top, footer_bottom = footer_band
+            footer_height = footer_bottom - footer_top + 1
+            card_y = footer_top + max(0, int((footer_height - card_size) / 2))
+            card_y = max(footer_top, min(card_y, footer_bottom + 1 - card_size))
+            footer_result = _draw_deterministic_footer_copy(
+                poster=poster,
+                brand=brand,
+                overlay_config=overlay_config,
+                footer_band=footer_band,
+                qr_left=card_x,
+                footer_fill=_footer_blue_fill(poster, footer_band),
+            )
+        else:
+            card_y = max(0, min(height - bottom_margin - card_size, height - card_size))
     elif anchor == "footer_right":
         footer_band = _detect_footer_bottom_band(poster)
         card_x = max(0, min(width - right_margin - card_size, width - card_size))
@@ -784,7 +918,11 @@ def overlay_poster_qr(poster_path: Path, brand: dict[str, Any], template: dict[s
         card_y = max(0, min(box["y"] - padding, height - card_size))
     radius = max(10, int(card_size * _ratio_value(overlay_config, "radius_ratio", 0.08)))
 
-    if anchor in {"bottom_right", "footer_right"} and bool(overlay_config.get("cleanup_background", True)):
+    if (
+        anchor in {"bottom_right", "footer_right"}
+        and bool(overlay_config.get("cleanup_background", True))
+        and not deterministic_footer
+    ):
         draw = ImageDraw.Draw(poster)
         cleanup_left = max(0, card_x - int(card_size * _ratio_value(overlay_config, "cleanup_left_ratio", 0.7)))
         cleanup_top = max(footer_band[0] if footer_band else 0, card_y - int(card_size * _ratio_value(overlay_config, "cleanup_top_ratio", 0.08)))
@@ -846,6 +984,8 @@ def overlay_poster_qr(poster_path: Path, brand: dict[str, Any], template: dict[s
             "padding": padding,
             "anchor": anchor or "ratio",
             "footer_band": footer_band,
+            "deterministic_footer": deterministic_footer,
+            "footer": footer_result,
         },
     }
 
@@ -1148,7 +1288,8 @@ def compile_prompt(
         asset_rules = """Logo/二维码规则：
 - 不要生成品牌 Logo。
 - 不要生成二维码、假二维码、二维码纹理或扫码图案。
-- 请保留干净的 Logo 和扫码留白区域，不要保留模板示例图中的占位文字、占位图标或假二维码图案；最终 Logo 和二维码由脚本用真实品牌素材贴入。"""
+- 请保留干净的 Logo 区域，不要保留模板示例图中的占位文字、占位图标或假二维码图案。
+- 最底部 footer 由脚本重绘并贴入真实二维码；模型不要在底部生成二维码、扫码卡片、预留框、底栏 CTA 文字、图标或复杂装饰。"""
     elif asset_mode == ASSET_MODE_HYBRID:
         reference_block = (
             "参考图输入顺序：\n"
@@ -1158,7 +1299,8 @@ def compile_prompt(
         asset_rules = """Logo/二维码规则：
 - 品牌 Logo 来自第 2 张真实 Logo 参考图，作为海报品牌区的一部分自然生成，不要后贴感、不要变形、不要替换品牌字样。
 - 不要生成二维码、假二维码、二维码纹理、条形码或抽象扫码图案。
-- 底部扫码区保持干净蓝色或浅色背景即可，不要生成白底扫码卡片、扫码占位框、占位文字、占位二维码、二维码图案或复杂纹理；真实二维码卡片会由脚本贴入。"""
+- 最底部 footer 由脚本重绘并贴入真实二维码；模型不要在底部生成二维码、扫码卡片、预留框、底栏 CTA 文字、图标或复杂装饰。
+- 请让主要正文、卡片和表格停在底部 footer 以上；最底部只保留一条干净品牌色或浅色横条即可，横条内不要放任何需要保留的内容。"""
     else:
         reference_block = (
             "参考图输入顺序：\n"

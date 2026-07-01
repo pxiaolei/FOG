@@ -27,6 +27,7 @@ logo_overlay:
 display:
   poster_brand_name: "哈啰"
   forbidden_brand_text: ["哈啰轻快"]
+  footer_color: "#078DFF"
 
 output:
   filename_template: "{brand}-{city}-{timestamp}.png"

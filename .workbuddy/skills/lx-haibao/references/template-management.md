@@ -59,7 +59,8 @@ template:
 - 当前模板命名使用 `template01` 到 `template10`。
 - 模板图必须品牌中性，只保留版式结构、信息层级和扫码区位置感，不保留旧品牌、旧二维码或假二维码。
 - 模板不要内置大白底扫码卡片；二维码白边和卡片由脚本后处理生成，避免模型把白底当成真实内容放大或错位。
-- 默认 `hybrid` 模式依赖 `qr_overlay`，用于把真实二维码贴入模板扫码区；模型不生成二维码。多品牌模板建议使用 `anchor: bottom_right`，让二维码按最终海报右下角几何边距定位，避免依赖 footer 颜色识别或整张图 y_ratio。
+- 默认 `hybrid` 模式依赖 `qr_overlay`，用于把真实二维码贴入模板扫码区；模型不生成二维码。多品牌模板建议使用 `anchor: bottom_right`，让二维码按最终海报右下角几何边距定位。`bottom_right` 默认启用确定性 footer：脚本按 `size_ratio`、`padding_ratio`、`right_margin_ratio`、`bottom_margin_ratio` 和 `footer_height_ratio` 重绘整条底栏，并把真实二维码卡片在 footer 内垂直居中，避免模型生成的扫码框或伪二维码残留。
+- 品牌 footer 色优先来自 `brands/<brand_id>.yaml` 的 `display.footer_color`，也可在单个模板 `qr_overlay.footer_color` 临时覆盖；未配置时才从模型生成图底部采样回退。
 - 如果模板底部没有安全贴码区，或旧版二维码原本位于顶部，给该模板的 `qr_overlay` 增加 `append_footer_for_qr: true`；脚本会在最终海报底部追加一段同色 footer 后再贴二维码，避免覆盖原活动内容。
 - 如模板需要支持内容偏多时自动拉长，配置 `content_sizing.long_size` 和对应阈值；默认策略应优先拉长画幅，不把活动模块硬压进固定高度。
 - 如需启用旧版 `--asset-mode overlay`，每张模板只允许一个二维码占位区；`qr_overlay` 使用最终海报宽高比例，`x_ratio` 和 `y_ratio` 表示二维码左上角，`size_ratio` 按宽度计算。
