@@ -31,12 +31,43 @@ description: 从公司 dataReporting 库按 date、city_name、brand_name 聚合
 
 ## 工作流
 
+首次给同事配置时，先从 `config/fog_config.yaml.example` 复制 `lx_hhbbu` 配置块到自己的 `config/fog_config.yaml`，并确认本机 hhdata Excel 位置：
+
+```yaml
+lx_hhbbu:
+  output_dir: "workspace/02数据导入/处理日志/lx-hhbbu"
+  local_hhdata:
+    source_type: "excel_dir"
+    input_dir: "workspace/02数据导入/待处理/hhdata"
+    file: ""
+    required_before_run: false
+```
+
+如果同事把 hhdata 固定放在某个目录，填写 `local_hhdata.input_dir`；如果只有一个固定 Excel 文件，填写 `local_hhdata.file`。也可以不改配置，运行时临时传 `--hhdata-dir` 或 `--hhdata-file`。
+
+只检查本地 hhdata 位置，不查询公司库：
+
+```bash
+python3 .workbuddy/skills/lx-hhbbu/scripts/hhbbu_source_export.py \
+  --check-local-hhdata
+```
+
 导出 2026-06-18 到 2026-06-19：
 
 ```bash
 python3 .workbuddy/skills/lx-hhbbu/scripts/hhbbu_source_export.py \
   --start-date 2026-06-18 \
   --end-date 2026-06-19
+```
+
+如果本次要指定某个本地 hhdata 文件，并要求找不到时直接失败：
+
+```bash
+python3 .workbuddy/skills/lx-hhbbu/scripts/hhbbu_source_export.py \
+  --start-date 2026-06-18 \
+  --end-date 2026-06-19 \
+  --hhdata-file "/path/to/hhdata.xlsx" \
+  --require-local-hhdata
 ```
 
 输出 CSV / JSON / Markdown，CSV 字段包括：
@@ -59,6 +90,7 @@ workspace/02数据导入/处理日志/lx-hhbbu/
 
 - 按 `date + city_name + brand_name` 聚合的 CSV
 - 来源表按日期汇总
+- 本地 hhdata Excel 定位结果
 - JSON 审计包
 - Markdown 字段口径说明
 
@@ -67,3 +99,4 @@ workspace/02数据导入/处理日志/lx-hhbbu/
 - 不连接本地 RDS。
 - 不写任何数据库。
 - 不直接读取或修改公司库，只通过 `lx_shujuku` 执行只读查询。
+- `local_hhdata` 只用于定位同事本机 Excel 文件，不会自动导入或回写。

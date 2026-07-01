@@ -16,6 +16,8 @@ from typing import Any
 
 import yaml
 
+EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xls"}
+
 
 def find_project_root(start: Path | None = None) -> Path:
     current = (start or Path.cwd()).resolve()
@@ -126,6 +128,13 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
     if isinstance(dapanribao, dict):
         dirs.append(resolve_path(dapanribao.get("output_dir"), "workspace/03数据报表/日报"))
 
+    hhbbu = config.get("lx_hhbbu", {})
+    if isinstance(hhbbu, dict):
+        dirs.append(resolve_path(hhbbu.get("output_dir"), "workspace/02数据导入/处理日志/lx-hhbbu"))
+        local_hhdata = hhbbu.get("local_hhdata", {})
+        if isinstance(local_hhdata, dict) and local_hhdata.get("input_dir"):
+            dirs.append(resolve_path(local_hhdata.get("input_dir")))
+
     haibao = config.get("lx_haibao", {})
     if isinstance(haibao, dict):
         dirs.append(resolve_path(haibao.get("output_dir"), "workspace/09端外海报图/产出图"))
@@ -227,6 +236,16 @@ def lark_cli_exists(config: dict[str, Any]) -> bool:
     return workbuddy_lark_cli_path().exists()
 
 
+def is_excel_candidate(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in EXCEL_SUFFIXES and not path.name.startswith("~$")
+
+
+def count_excel_candidates(path: Path) -> int:
+    if not path.is_dir():
+        return 0
+    return sum(1 for child in path.iterdir() if is_excel_candidate(child))
+
+
 def cmd_check(_: argparse.Namespace) -> int:
     if not CONFIG_PATH.exists():
         print(f"[error] config.fog_config: 不存在 {CONFIG_PATH}")
@@ -293,6 +312,37 @@ def cmd_check(_: argparse.Namespace) -> int:
             add_check(items, "ok", "lx_haibao.image_api", "至少一个 provider 已配置 API Key")
         else:
             add_check(items, "warning", "lx_haibao.image_api", "未配置图片 API Key；海报生成会不可用")
+
+    if enabled.get("lx_hhbbu"):
+        hhbbu = config.get("lx_hhbbu", {}) or {}
+        if not isinstance(hhbbu, dict):
+            hhbbu = {}
+        required(items, "lx_hhbbu.output_dir", hhbbu.get("output_dir"), "warning")
+        local_hhdata = hhbbu.get("local_hhdata", {}) if isinstance(hhbbu, dict) else {}
+        if not isinstance(local_hhdata, dict):
+            local_hhdata = {}
+        require_local = bool(local_hhdata.get("required_before_run"))
+        severity = "error" if require_local else "warning"
+        configured_file = str(local_hhdata.get("file") or "").strip()
+        configured_dir = str(local_hhdata.get("input_dir") or "").strip()
+        if configured_file:
+            path = resolve_path(configured_file)
+            if is_excel_candidate(path):
+                add_check(items, "ok", "lx_hhbbu.local_hhdata.file", f"已找到 Excel: {path}")
+            else:
+                add_check(items, severity, "lx_hhbbu.local_hhdata.file", f"未找到可用 Excel: {path}")
+        elif configured_dir:
+            path = resolve_path(configured_dir)
+            if path.is_dir():
+                count = count_excel_candidates(path)
+                if count:
+                    add_check(items, "ok", "lx_hhbbu.local_hhdata.input_dir", f"已找到 {count} 个 Excel 候选: {path}")
+                else:
+                    add_check(items, severity, "lx_hhbbu.local_hhdata.input_dir", f"目录存在但没有 Excel 候选: {path}")
+            else:
+                add_check(items, severity, "lx_hhbbu.local_hhdata.input_dir", f"目录不存在: {path}")
+        else:
+            add_check(items, severity, "lx_hhbbu.local_hhdata", "未配置本地 hhdata Excel 文件或目录")
 
     if enabled.get("lx_nongfu"):
         nongfu = config.get("lx_nongfu", {}) or {}

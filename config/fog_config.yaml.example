@@ -67,6 +67,20 @@ lx_shujuku:
     max_limit: 1000
 
 # ============================================================
+# lx_hhbbu
+# 要配置什么：hhdata B补来源导出的输出目录，以及同事本机 hhdata Excel 位置。
+# 说明：lx-hhbbu 仍只查询公司 dataReporting；local_hhdata 只用于定位/校验同事本地 Excel，不连接本地 RDS、不写数据库。
+# 用法：如果同事把 hhdata 固定放在某个目录，填写 input_dir；如果只有单个固定文件，填写 file。
+# ============================================================
+lx_hhbbu:
+  output_dir: "workspace/02数据导入/处理日志/lx-hhbbu"
+  local_hhdata:
+    source_type: "excel_dir"
+    input_dir: "workspace/02数据导入/待处理/hhdata"
+    file: ""
+    required_before_run: false
+
+# ============================================================
 # lx_zhutichaibiao
 # 要配置什么：按运营主体拆表的工作目录、默认对接人、字段识别规则。
 # 说明：分享模板不写个人默认对接人；本机真实配置可填写中文全名列表。
