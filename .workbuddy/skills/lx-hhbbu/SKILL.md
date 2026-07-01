@@ -37,15 +37,13 @@ description: 从公司 dataReporting 库按 date、city_name、brand_name 聚合
 lx_hhbbu:
   output_dir: "workspace/02数据导入/处理日志/lx-hhbbu"
   local_hhdata:
-    source_type: "excel_dir"
-    input_dir: "workspace/02数据导入/待处理/hhdata"
     file: ""
     sheet_name: ""
     backup_dir: "workspace/02数据导入/处理日志/lx-hhbbu/backups"
-    required_before_run: false
+    required_before_run: true
 ```
 
-如果同事把 hhdata 固定放在某个目录，填写 `local_hhdata.input_dir`；如果只有一个固定 Excel 文件，填写 `local_hhdata.file`。也可以不改配置，运行时临时传 `--hhdata-dir` 或 `--hhdata-file`。
+`local_hhdata.file` 必须指向唯一的 hhdata Excel 文件。不要填写目录，也不要让脚本从目录里猜测“最新文件”。临时处理其他文件时，只能用 `--hhdata-file` 明确指定单个 Excel。
 
 只检查本地 hhdata 位置，不查询公司库：
 

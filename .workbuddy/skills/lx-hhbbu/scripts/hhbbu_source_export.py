@@ -43,7 +43,6 @@ Q2 = Decimal("0.01")
 EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xls"}
 WRITABLE_EXCEL_SUFFIXES = {".xlsx", ".xlsm"}
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "workspace" / "02数据导入" / "处理日志" / "lx-hhbbu"
-DEFAULT_HHDATA_DIR = PROJECT_ROOT / "workspace" / "02数据导入" / "待处理" / "hhdata"
 TARGET_COLUMN_ALIASES = {
     "date": ("日期",),
     "city_name": ("城市名称", "城市"),
@@ -66,8 +65,6 @@ class LocalHhdataInfo:
     path: str
     message: str
     selected_file: str = ""
-    candidate_count: int = 0
-    candidates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -177,17 +174,9 @@ def is_excel_candidate(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in EXCEL_SUFFIXES and not path.name.startswith("~$")
 
 
-def list_excel_candidates(directory: Path) -> list[Path]:
-    if not directory.is_dir():
-        return []
-    candidates = [path for path in directory.iterdir() if is_excel_candidate(path)]
-    return sorted(candidates, key=lambda path: (-path.stat().st_mtime, path.name))
-
-
 def inspect_local_hhdata(
     *,
     hhdata_file: str | None,
-    hhdata_dir: str | None,
     require_local_hhdata: bool,
     config: dict[str, Any],
 ) -> LocalHhdataInfo:
@@ -196,85 +185,39 @@ def inspect_local_hhdata(
     required = require_local_hhdata or config_requires
 
     location_value: str | Path | None
-    location_type: str
     source: str
     explicit = False
     if hhdata_file:
         location_value = hhdata_file
-        location_type = "file"
         source = "--hhdata-file"
-        explicit = True
-    elif hhdata_dir:
-        location_value = hhdata_dir
-        location_type = "dir"
-        source = "--hhdata-dir"
         explicit = True
     elif local_config.get("file"):
         location_value = local_config.get("file")
-        location_type = "file"
         source = "fog_config.yaml:lx_hhbbu.local_hhdata.file"
-    elif local_config.get("input_dir"):
-        location_value = local_config.get("input_dir")
-        location_type = "dir"
-        source = "fog_config.yaml:lx_hhbbu.local_hhdata.input_dir"
     else:
-        location_value = DEFAULT_HHDATA_DIR
-        location_type = "dir"
-        source = "default"
+        return LocalHhdataInfo(
+            status="error" if required else "warning",
+            source="fog_config.yaml:lx_hhbbu.local_hhdata.file",
+            path="",
+            message="未配置唯一 hhdata Excel 文件路径；请填写 lx_hhbbu.local_hhdata.file 或传 --hhdata-file",
+        )
 
     path = resolve_runtime_path(location_value)
     failure_status = "error" if required or explicit else "warning"
 
-    if location_type == "file":
-        if is_excel_candidate(path):
-            return LocalHhdataInfo(
-                status="ok",
-                source=source,
-                path=str(path),
-                message=f"已定位本地 hhdata Excel: {path}",
-                selected_file=str(path),
-                candidate_count=1,
-                candidates=(str(path),),
-            )
+    if is_excel_candidate(path):
         return LocalHhdataInfo(
-            status=failure_status,
+            status="ok",
             source=source,
             path=str(path),
-            message=f"未找到可用本地 hhdata Excel: {path}",
+            message=f"已定位唯一本地 hhdata Excel: {path}",
+            selected_file=str(path),
         )
-
-    if not path.is_dir():
-        return LocalHhdataInfo(
-            status=failure_status,
-            source=source,
-            path=str(path),
-            message=f"本地 hhdata 目录不存在: {path}",
-        )
-
-    candidates = list_excel_candidates(path)
-    if not candidates:
-        return LocalHhdataInfo(
-            status=failure_status,
-            source=source,
-            path=str(path),
-            message=f"本地 hhdata 目录存在，但没有 Excel 候选文件: {path}",
-        )
-
-    shown = tuple(str(candidate) for candidate in candidates[:20])
-    if len(candidates) == 1:
-        message = f"已定位 1 个本地 hhdata Excel: {candidates[0]}"
-        selected_file = str(candidates[0])
-    else:
-        message = f"已定位 {len(candidates)} 个本地 hhdata Excel 候选；写回前必须用 --hhdata-file 或配置 file 固定某个文件"
-        selected_file = ""
     return LocalHhdataInfo(
-        status="ok",
+        status=failure_status,
         source=source,
         path=str(path),
-        message=message,
-        selected_file=selected_file,
-        candidate_count=len(candidates),
-        candidates=shown,
+        message=f"未找到可用本地 hhdata Excel: {path}",
     )
 
 
@@ -285,8 +228,6 @@ def local_hhdata_to_dict(info: LocalHhdataInfo) -> dict[str, Any]:
         "path": info.path,
         "message": info.message,
         "selected_file": info.selected_file,
-        "candidate_count": info.candidate_count,
-        "candidates": list(info.candidates),
     }
 
 
@@ -296,10 +237,6 @@ def print_local_hhdata_info(info: LocalHhdataInfo) -> None:
     print(f"来源: {info.source}")
     if info.selected_file:
         print(f"写回文件: {info.selected_file}")
-    if info.candidates:
-        print("候选文件:")
-        for candidate in info.candidates:
-            print(f"- {candidate}")
 
 
 def find_header(headers: dict[str, int], field: str) -> int | None:
@@ -672,7 +609,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end-date", type=parse_date, help="结束日期 YYYY-MM-DD")
     parser.add_argument("--source-limit", type=int, default=source_limit, help="公司库单日聚合查询 LIMIT，默认 1000")
     parser.add_argument("--hhdata-file", help="本地 hhdata Excel 文件路径；优先于 fog_config.yaml")
-    parser.add_argument("--hhdata-dir", help="本地 hhdata Excel 目录；优先于 fog_config.yaml")
     parser.add_argument("--require-local-hhdata", action="store_true", help="找不到本地 hhdata Excel 时失败")
     parser.add_argument("--check-local-hhdata", action="store_true", help="只检查本地 hhdata 位置，不查询公司库")
     parser.add_argument("--update-hhdata", action="store_true", help="按公司源生成本地 hhdata Excel 三列写回计划；默认不保存")
@@ -701,7 +637,6 @@ def main() -> int:
     args = parse_args()
     local_hhdata = inspect_local_hhdata(
         hhdata_file=args.hhdata_file,
-        hhdata_dir=args.hhdata_dir,
         require_local_hhdata=args.require_local_hhdata or args.update_hhdata,
         config=args.hhbbu_config,
     )
@@ -740,7 +675,6 @@ def main() -> int:
             "source_limit": args.source_limit,
             "output_dir": args.output_dir,
             "hhdata_file": args.hhdata_file,
-            "hhdata_dir": args.hhdata_dir,
             "require_local_hhdata": args.require_local_hhdata,
             "update_hhdata": args.update_hhdata,
             "confirmed": args.confirmed,
