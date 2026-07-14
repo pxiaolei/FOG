@@ -43,6 +43,15 @@ FOG 是 LXX 出行业务运营自动化 Skill 工作区，面向同事的共享�
 
 内部导入、共补入库、个人数据库迁移等 Skill 不属于共享版；不要在共享工作区里假设存在。
 
+`lx_shujuku` 共享仓固定规则：
+
+- 本仓位置固定为 `.workbuddy/skills/lx_shujuku/`，入口是 `SKILL.md`。
+- 结构文档只认三处：`SKILL.md` 的摘要表、`assets/schema.json` 的机器 schema、`references/table_catalog.md` 的人读目录；表数、字段数、字段注释必须来自线上 schema 或这三个文件，不能凭记忆改。
+- 公司库新增表或字段时，先用 `scripts/db_tools.py schema-diff` 对比线上，再用 `scripts/db_tools.py refresh-schema --yes` 刷新；不要手工猜字段。
+- 共享仓默认不携带真实 `config/fog_config.yaml`；需要 live schema 或查询时，使用操作者自己的根配置文件，不要把真实账号密码写入仓库。
+- 刷新会生成 `assets/schema.json.bak.*` 和 `references/table_catalog.md.bak.*`，这些是本地备份，保持 gitignored，不提交。
+- 验收至少跑：`schema-diff` 应归零、`describe <新增表>` 能在本地白名单模式返回字段、`PYTHONPATH=.workbuddy/skills/lx_shujuku/scripts python -m unittest discover -s .workbuddy/skills/lx_shujuku/tests` 通过，并扫描是否还有旧表数文案。
+
 ## 3. 配置边界
 
 - 共享模板：`config/fog_config.yaml.example`

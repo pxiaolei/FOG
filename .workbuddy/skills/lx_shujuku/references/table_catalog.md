@@ -1,6 +1,6 @@
 # dataReporting 数据库表结构目录
 
-> 生成时间：2026-06-30T16:37:07.273265+08:00  |  数据库：dataReporting  |  共 19 张表
+> 生成时间：2026-07-14T10:57:00.986155+08:00  |  数据库：dataReporting  |  共 20 张表
 
 ---
 
@@ -16,15 +16,16 @@
 8. [honghu_check_data](#honghu-check-data) — 宏鹄数据校验表
 9. [honghu_coupon_marketing_data](#honghu-coupon-marketing-data) — 宏鹄卡券营销数据表
 10. [honghu_data_connect](#honghu-data-connect) — 鸿鹄数据对接列表
-11. [honghu_driver_evaluation_data](#honghu-driver-evaluation-data) — 宏鹄司机考核数据表
-12. [honghu_order_data](#honghu-order-data) — 宏鹄订单数据离线看板-订单数据表
-13. [honghu_profit_data](#honghu-profit-data) — 宏鹄毛利数据表
-14. [honghu_recon_data](#honghu-recon-data) — 账单对账数据表
-15. [honghu_time_split_data](#honghu-time-split-data) — 宏鹄订单运力分时-供需分时明细数据表
-16. [honghu_xf_driver_data](#honghu-xf-driver-data) — 先锋司机数据
-17. [operator_brand](#operator-brand) — 运营主体-品牌名称城市对照表
-18. [order_real_time_data](#order-real-time-data) — 订单实时累计数据表
-19. [transport_data_report](#transport-data-report) — 鸿鹄传输数据统计明细
+11. [honghu_detail_data](#honghu-detail-data) — 宏鹄详情数据汇总表（汇总数据）
+12. [honghu_driver_evaluation_data](#honghu-driver-evaluation-data) — 宏鹄司机考核数据表
+13. [honghu_order_data](#honghu-order-data) — 宏鹄订单数据离线看板-订单数据表
+14. [honghu_profit_data](#honghu-profit-data) — 宏鹄毛利数据表
+15. [honghu_recon_data](#honghu-recon-data) — 账单对账数据表
+16. [honghu_time_split_data](#honghu-time-split-data) — 宏鹄订单运力分时-供需分时明细数据表
+17. [honghu_xf_driver_data](#honghu-xf-driver-data) — 先锋司机数据
+18. [operator_brand](#operator-brand) — 运营主体-品牌名称城市对照表
+19. [order_real_time_data](#order-real-time-data) — 订单实时累计数据表
+20. [transport_data_report](#transport-data-report) — 鸿鹄传输数据统计明细
 
 ---
 
@@ -82,7 +83,7 @@
 
 ## brand_city_tr_data
 
-**品牌城市TR值配置表**  |  7 个字段
+**品牌城市TR值配置表**  |  8 个字段
 
 | # | 字段名 | 类型 | 键 | 可为空 | 注释 |
 |---|--------|------|-----|--------|------|
@@ -91,8 +92,9 @@
 | 3 | `brand_name` | `varchar(100)` |  | 是 | 品牌名称 |
 | 4 | `city_name` | `varchar(100)` |  | 是 | 城市名称 |
 | 5 | `tr_value` | `decimal(10,2)` |  | 是 | TR值（百分比，如：15.5 表示 15.5%） |
-| 6 | `create_time` | `datetime` |  | 是 | 创建时间 |
-| 7 | `update_time` | `datetime` |  | 是 | 更新时间 |
+| 6 | `tr_total` | `decimal(10,2)` |  | 是 | 总TR（总抽佣） |
+| 7 | `create_time` | `datetime` |  | 是 | 创建时间 |
+| 8 | `update_time` | `datetime` |  | 是 | 更新时间 |
 
 ## card_data
 
@@ -163,7 +165,7 @@
 
 ## honghu_activity_marketing_data
 
-**宏鹄活动营销数据表**  |  30 个字段
+**宏鹄活动营销数据表**  |  32 个字段
 
 | # | 字段名 | 类型 | 键 | 可为空 | 注释 |
 |---|--------|------|-----|--------|------|
@@ -195,8 +197,10 @@
 | 26 | `merchant_subsidy_amount` | `decimal(10,4)` |  | 是 | 商家补贴金额（元） |
 | 27 | `agent_bear_amount` | `decimal(10,4)` |  | 是 | 代理商承担金额（元，当前均为0） |
 | 28 | `cooperator_bear_amount` | `decimal(10,4)` |  | 是 | 合作运营方承担金额（元） |
-| 29 | `created_time` | `datetime` |  | 是 | 数据创建时间 |
-| 30 | `updated_time` | `datetime` |  | 是 | 数据更新时间 |
+| 29 | `activity_scenario` | `varchar(64)` |  | 是 | 活动场景 |
+| 30 | `driver_level` | `varchar(32)` |  | 是 | 司机等级 |
+| 31 | `created_time` | `datetime` |  | 是 | 数据创建时间 |
+| 32 | `updated_time` | `datetime` |  | 是 | 数据更新时间 |
 
 ## honghu_capacity_data
 
@@ -271,7 +275,7 @@
 
 ## honghu_coupon_marketing_data
 
-**宏鹄卡券营销数据表**  |  35 个字段
+**宏鹄卡券营销数据表**  |  37 个字段
 
 | # | 字段名 | 类型 | 键 | 可为空 | 注释 |
 |---|--------|------|-----|--------|------|
@@ -293,23 +297,25 @@
 | 16 | `reviewer` | `varchar(40)` |  | 是 | 卡券审核人 |
 | 17 | `merchant_share_ratio` | `decimal(8,6)` |  | 否 | 商家承担比例（0-1） |
 | 18 | `agent_share_ratio` | `decimal(8,6)` |  | 否 | 代理商承担比例（当前均为0） |
-| 19 | `total_coupon_sales_revenue` | `decimal(10,2)` |  | 否 | 总券后售卡收入（元） |
-| 20 | `platform_coupon_sales_revenue` | `decimal(10,2)` |  | 否 | 平台券后售卡收入（元） |
-| 21 | `merchant_coupon_sales_revenue` | `decimal(10,2)` |  | 否 | 商家券后售卡收入（元） |
-| 22 | `agent_coupon_sales_revenue` | `decimal(10,2)` |  | 否 | 代理商券后售卡收入（元，当前均为0） |
-| 23 | `cooperator_coupon_sales_revenue` | `decimal(10,2)` |  | 否 | 合作运营商券后售卡收入（元，当前均为0） |
-| 24 | `daily_card_purchase_count` | `int(10) unsigned` |  | 否 | 当日购卡人数 |
-| 25 | `daily_verification_count` | `int(10) unsigned` |  | 否 | 当日核销人数 |
-| 26 | `verification_order_count` | `int(10) unsigned` |  | 否 | 核销订单数 |
-| 27 | `verification_order_gmv` | `decimal(12,2)` |  | 否 | 核销订单GMV（元） |
-| 28 | `total_subsidy_amount` | `decimal(10,2)` |  | 否 | 总补贴金额（元） |
-| 29 | `platform_subsidy_amount` | `decimal(10,2)` |  | 否 | 平台补贴金额（元） |
-| 30 | `channel_subsidy_amount` | `decimal(10,2)` |  | 否 | 渠道补贴金额（元） |
-| 31 | `merchant_subsidy_amount` | `decimal(10,2)` |  | 否 | 商家补贴金额（元） |
-| 32 | `agent_subsidy_amount` | `decimal(10,2)` |  | 否 | 代理商补贴金额（元，当前均为0） |
-| 33 | `cooperator_subsidy_amount` | `decimal(10,2)` |  | 否 | 合作运营商补贴金额（元，当前均为0） |
-| 34 | `created_time` | `datetime` |  | 否 | 数据创建时间 |
-| 35 | `updated_time` | `datetime` |  | 否 | 数据更新时间 |
+| 19 | `activity_scenario` | `varchar(64)` |  | 是 | 活动场景 |
+| 20 | `driver_level` | `varchar(32)` |  | 是 | 司机等级 |
+| 21 | `total_coupon_sales_revenue` | `decimal(10,2)` |  | 否 | 总券后售卡收入（元） |
+| 22 | `platform_coupon_sales_revenue` | `decimal(10,2)` |  | 否 | 平台券后售卡收入（元） |
+| 23 | `merchant_coupon_sales_revenue` | `decimal(10,2)` |  | 否 | 商家券后售卡收入（元） |
+| 24 | `agent_coupon_sales_revenue` | `decimal(10,2)` |  | 否 | 代理商券后售卡收入（元，当前均为0） |
+| 25 | `cooperator_coupon_sales_revenue` | `decimal(10,2)` |  | 否 | 合作运营商券后售卡收入（元，当前均为0） |
+| 26 | `daily_card_purchase_count` | `int(10) unsigned` |  | 否 | 当日购卡人数 |
+| 27 | `daily_verification_count` | `int(10) unsigned` |  | 否 | 当日核销人数 |
+| 28 | `verification_order_count` | `int(10) unsigned` |  | 否 | 核销订单数 |
+| 29 | `verification_order_gmv` | `decimal(12,2)` |  | 否 | 核销订单GMV（元） |
+| 30 | `total_subsidy_amount` | `decimal(10,2)` |  | 否 | 总补贴金额（元） |
+| 31 | `platform_subsidy_amount` | `decimal(10,2)` |  | 否 | 平台补贴金额（元） |
+| 32 | `channel_subsidy_amount` | `decimal(10,2)` |  | 否 | 渠道补贴金额（元） |
+| 33 | `merchant_subsidy_amount` | `decimal(10,2)` |  | 否 | 商家补贴金额（元） |
+| 34 | `agent_subsidy_amount` | `decimal(10,2)` |  | 否 | 代理商补贴金额（元，当前均为0） |
+| 35 | `cooperator_subsidy_amount` | `decimal(10,2)` |  | 否 | 合作运营商补贴金额（元，当前均为0） |
+| 36 | `created_time` | `datetime` |  | 否 | 数据创建时间 |
+| 37 | `updated_time` | `datetime` |  | 否 | 数据更新时间 |
 
 ## honghu_data_connect
 
@@ -338,6 +344,58 @@
 | 19 | `progress` | `int(11)` |  | 是 | 进度 |
 | 20 | `pull_time` | `varchar(50)` |  | 是 | 拉取时间（数据入库时间） |
 | 21 | `brand_name` | `varchar(100)` | `MUL` | 是 | 品牌名称（通过租户映射关联） |
+
+## honghu_detail_data
+
+**宏鹄详情数据汇总表（汇总数据）**  |  45 个字段
+
+| # | 字段名 | 类型 | 键 | 可为空 | 注释 |
+|---|--------|------|-----|--------|------|
+| 1 | `id` | `bigint(20)` | `PRI` | 否 | 主键ID |
+| 2 | `date_day` | `varchar(20)` | `MUL` | 否 | 日期（天），格式：yyyy-MM-dd |
+| 3 | `brand_name` | `varchar(100)` | `MUL` | 否 | 品牌名称 |
+| 4 | `city_name` | `varchar(100)` | `MUL` | 否 | 城市名称 |
+| 5 | `passenger_order_count` | `int(11)` |  | 是 | 乘客发单量 |
+| 6 | `match_count` | `int(11)` |  | 是 | 匹配量 |
+| 7 | `response_count` | `int(11)` |  | 是 | 应答量 |
+| 8 | `completed_order_count` | `int(11)` |  | 是 | 完单量 |
+| 9 | `passenger_cancel_count_after_response` | `int(11)` |  | 是 | 应答后乘客取消量 |
+| 10 | `driver_cancel_count_after_response` | `int(11)` |  | 是 | 应答后司机取消量 |
+| 11 | `customer_service_close_count_after_response` | `int(11)` |  | 是 | 应答后客服关闭订单数 |
+| 12 | `gmv` | `decimal(20,4)` |  | 是 | GMV（成交总额） |
+| 13 | `online_duration_hour` | `decimal(20,4)` |  | 是 | 在线时长（小时） |
+| 14 | `service_duration_hour` | `decimal(20,4)` |  | 是 | 服务时长（小时） |
+| 15 | `online_driver_count` | `int(11)` |  | 是 | 在线司机数 |
+| 16 | `completion_driver_count` | `int(11)` |  | 是 | 完单司机数 |
+| 17 | `response_driver_count` | `int(11)` |  | 是 | 应答司机数 |
+| 18 | `valid_driver_count` | `int(11)` |  | 是 | 有效司机数 |
+| 19 | `first_completion_driver_count` | `int(11)` |  | 是 | 首次完单司机数 |
+| 20 | `total_subsidy_amount` | `decimal(20,4)` |  | 是 | 总b补金额（元）= 营销表总奖励金额 + 卡券表总补贴金额 |
+| 21 | `merchant_subsidy_amount` | `decimal(20,4)` |  | 是 | 商家b补金额（元）= 营销表商家补贴 + 卡券表商家补贴 |
+| 22 | `tr_value` | `decimal(20,6)` |  | 是 | TR值（品牌抽佣用：GMV * tr_value） |
+| 23 | `tr_total` | `decimal(20,6)` |  | 是 | 总TR值（总抽佣用：GMV * tr_total） |
+| 24 | `total_commission` | `decimal(20,4)` |  | 是 | 总抽佣 = GMV * tr_total |
+| 25 | `brand_commission` | `decimal(20,4)` |  | 是 | 品牌抽佣 = GMV * tr_value |
+| 26 | `merchant_coupon_sales_revenue` | `decimal(20,4)` |  | 是 | 商家券后售卡收入（元） |
+| 27 | `response_rate` | `decimal(10,6)` |  | 是 | 应答率 = 应答量 / 乘客发单量 |
+| 28 | `pk_success_rate` | `decimal(10,6)` |  | 是 | PK成功率（直接取订单表均值） |
+| 29 | `transaction_rate` | `decimal(10,6)` |  | 是 | 成交率 = 完单量 / 乘客发单量 |
+| 30 | `average_order_price` | `decimal(20,4)` |  | 是 | 单均价 = GMV / 完单量 |
+| 31 | `completion_rate_after_response` | `decimal(10,6)` |  | 是 | 应答后完单率 = 完单量 / 应答量 |
+| 32 | `per_capita_online_duration_hour` | `decimal(20,4)` |  | 是 | 人均在线时长（小时） = 在线时长 / 在线司机数 |
+| 33 | `service_duration_ratio` | `decimal(10,6)` |  | 是 | 服务时长占比 = 服务时长 / 在线时长 |
+| 34 | `per_capita_completion_count` | `decimal(10,4)` |  | 是 | 人均完单量 = 完单量 / 完单司机数 |
+| 35 | `completion_per_hour` | `decimal(10,4)` |  | 是 | 每小时完单量（直接取运力表均值） |
+| 36 | `forced_co_subsidy_coupon_gmv` | `decimal(20,4)` |  | 是 | 强制共补卡券活动的总订单GMV（补贴类型="强制共补"） |
+| 37 | `forced_co_subsidy_zero_tr_activity_gmv` | `decimal(20,4)` |  | 是 | 强制共补0TR营销活动的总订单GMV（奖励模板="0TR"且补贴类型="强制共补"） |
+| 38 | `co_subsidy_gmv` | `decimal(20,4)` |  | 是 | 共补GMV = 强制共补卡券GMV + 强制共补0TR营销GMV |
+| 39 | `total_tr` | `decimal(20,6)` |  | 是 | 总TR = tr_total（直接取值） |
+| 40 | `merchant_tr` | `decimal(20,6)` |  | 是 | 商家TR = tr_value（直接取值） |
+| 41 | `merchant_single_subsidy_rate` | `decimal(10,6)` |  | 是 | 商家独补率 = 商家b补金额 / GMV |
+| 42 | `merchant_card_sales_rate` | `decimal(10,6)` |  | 是 | 商家售卡收入率 = 商家券后售卡收入 / GMV |
+| 43 | `gross_profit` | `decimal(20,6)` |  | 是 | 毛利 = 商家TR + 商家售卡收入率 - 商家独补率 - 1% |
+| 44 | `created_time` | `datetime` |  | 是 | 数据创建时间 |
+| 45 | `updated_time` | `datetime` |  | 是 | 数据更新时间 |
 
 ## honghu_driver_evaluation_data
 

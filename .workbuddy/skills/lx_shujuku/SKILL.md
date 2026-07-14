@@ -12,6 +12,7 @@ trigger_keywords:
   - 订单数据
   - 卡券
   - 先锋司机
+  - 详情数据
   - 接起率
   - TR值
 location: project
@@ -24,7 +25,7 @@ location: project
 提供对 `datareporting.sfczhushou.com` 当前白名单业务表的只读查询能力：
 
 1. **自动登录鉴权**：通过 `/dataReporting/user/login` 获取 Token，缓存复用
-2. **当前 19 张业务表覆盖**：活动、免佣卡、运力、订单、卡券、分时明细、接起率、TR配置、毛利、对账、数据校验、传输统计等
+2. **当前 20 张业务表覆盖**：活动、免佣卡、运力、订单、卡券、详情汇总、分时明细、接起率、TR配置、毛利、对账、数据校验、传输统计等
 3. **表结构浏览**：`describe <table>` 查看任意表的字段、类型、注释
 4. **只读 SQL 查询**：代码层强制只允许 `SELECT` / `SHOW` / `DESCRIBE` / `EXPLAIN`
 5. **operator_brand 码表接口**：提供品牌、城市、运营主体、对接人的稳定映射
@@ -39,27 +40,28 @@ location: project
 | 查询接口 | `POST /dataReporting/sql-query/execute` |
 | 鉴权方式 | Header: `token: {token}` |
 
-## 当前 19 张业务表
+## 当前 20 张业务表
 
 | 表名 | 说明 | 字段数 |
 |------|------|--------|
 | `activity_data` | 活动信息主表 | 28 |
 | `answer_rate_data` | 接起率数据表 | 10 |
-| `brand_city_tr_data` | 品牌城市TR值配置表 | 7 |
+| `brand_city_tr_data` | 品牌城市TR值配置表 | 8 |
 | `card_data` | 免佣卡信息表 | 30 |
 | `driver_real_time_data` | 运力实时累计数据表 | 23 |
-| `honghu_activity_marketing_data` | 宏鹄活动营销数据表 | 30 |
-| `honghu_capacity_data` | 宏鹄运力数据表 | 26 |
+| `honghu_activity_marketing_data` | 宏鹄活动营销数据表 | 32 |
+| `honghu_capacity_data` | 宏鹄运力数据离线看板-运力数据表 | 26 |
 | `honghu_check_data` | 宏鹄数据校验表 | 31 |
-| `honghu_coupon_marketing_data` | 宏鹄卡券营销数据表 | 35 |
+| `honghu_coupon_marketing_data` | 宏鹄卡券营销数据表 | 37 |
 | `honghu_data_connect` | 鸿鹄数据对接列表 | 21 |
+| `honghu_detail_data` | 宏鹄详情数据汇总表（汇总数据） | 45 |
 | `honghu_driver_evaluation_data` | 宏鹄司机考核数据表 | 41 |
-| `honghu_order_data` | 宏鹄订单数据表 | 25 |
+| `honghu_order_data` | 宏鹄订单数据离线看板-订单数据表 | 25 |
 | `honghu_profit_data` | 宏鹄毛利数据表 | 22 |
 | `honghu_recon_data` | 账单对账数据表 | 69 |
-| `honghu_time_split_data` | 宏鹄分时明细数据表 | 24 |
-| `honghu_xf_driver_data` | 先锋司机数据表 | 8 |
-| `operator_brand` | 运营主体-品牌-城市对照表 | 11 |
+| `honghu_time_split_data` | 宏鹄订单运力分时-供需分时明细数据表 | 24 |
+| `honghu_xf_driver_data` | 先锋司机数据 | 8 |
+| `operator_brand` | 运营主体-品牌名称城市对照表 | 11 |
 | `order_real_time_data` | 订单实时累计数据表 | 44 |
 | `transport_data_report` | 鸿鹄传输数据统计明细 | 10 |
 

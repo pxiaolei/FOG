@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-30T16:37:07.273265+08:00",
+  "generated_at": "2026-07-14T10:57:00.986155+08:00",
   "database": "dataReporting",
   "tables": [
     {
@@ -323,7 +323,7 @@
     {
       "name": "brand_city_tr_data",
       "comment": "品牌城市TR值配置表",
-      "column_count": 7,
+      "column_count": 8,
       "columns": [
         {
           "field": "id",
@@ -364,6 +364,14 @@
           "key": "",
           "default": null,
           "comment": "TR值（百分比，如：15.5 表示 15.5%）"
+        },
+        {
+          "field": "tr_total",
+          "type": "decimal(10,2)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "总TR（总抽佣）"
         },
         {
           "field": "create_time",
@@ -824,7 +832,7 @@
     {
       "name": "honghu_activity_marketing_data",
       "comment": "宏鹄活动营销数据表",
-      "column_count": 30,
+      "column_count": 32,
       "columns": [
         {
           "field": "id",
@@ -1049,6 +1057,22 @@
           "key": "",
           "default": "0.0000",
           "comment": "合作运营方承担金额（元）"
+        },
+        {
+          "field": "activity_scenario",
+          "type": "varchar(64)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "活动场景"
+        },
+        {
+          "field": "driver_level",
+          "type": "varchar(32)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "司机等级"
         },
         {
           "field": "created_time",
@@ -1541,7 +1565,7 @@
     {
       "name": "honghu_coupon_marketing_data",
       "comment": "宏鹄卡券营销数据表",
-      "column_count": 35,
+      "column_count": 37,
       "columns": [
         {
           "field": "id",
@@ -1686,6 +1710,22 @@
           "key": "",
           "default": "0.000000",
           "comment": "代理商承担比例（当前均为0）"
+        },
+        {
+          "field": "activity_scenario",
+          "type": "varchar(64)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "活动场景"
+        },
+        {
+          "field": "driver_level",
+          "type": "varchar(32)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "司机等级"
         },
         {
           "field": "total_coupon_sales_revenue",
@@ -1997,6 +2037,373 @@
           "key": "MUL",
           "default": null,
           "comment": "品牌名称（通过租户映射关联）"
+        }
+      ]
+    },
+    {
+      "name": "honghu_detail_data",
+      "comment": "宏鹄详情数据汇总表（汇总数据）",
+      "column_count": 45,
+      "columns": [
+        {
+          "field": "id",
+          "type": "bigint(20)",
+          "null": "NO",
+          "key": "PRI",
+          "default": null,
+          "comment": "主键ID"
+        },
+        {
+          "field": "date_day",
+          "type": "varchar(20)",
+          "null": "NO",
+          "key": "MUL",
+          "default": null,
+          "comment": "日期（天），格式：yyyy-MM-dd"
+        },
+        {
+          "field": "brand_name",
+          "type": "varchar(100)",
+          "null": "NO",
+          "key": "MUL",
+          "default": null,
+          "comment": "品牌名称"
+        },
+        {
+          "field": "city_name",
+          "type": "varchar(100)",
+          "null": "NO",
+          "key": "MUL",
+          "default": null,
+          "comment": "城市名称"
+        },
+        {
+          "field": "passenger_order_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "乘客发单量"
+        },
+        {
+          "field": "match_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "匹配量"
+        },
+        {
+          "field": "response_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "应答量"
+        },
+        {
+          "field": "completed_order_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "完单量"
+        },
+        {
+          "field": "passenger_cancel_count_after_response",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "应答后乘客取消量"
+        },
+        {
+          "field": "driver_cancel_count_after_response",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "应答后司机取消量"
+        },
+        {
+          "field": "customer_service_close_count_after_response",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "应答后客服关闭订单数"
+        },
+        {
+          "field": "gmv",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "GMV（成交总额）"
+        },
+        {
+          "field": "online_duration_hour",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "在线时长（小时）"
+        },
+        {
+          "field": "service_duration_hour",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "服务时长（小时）"
+        },
+        {
+          "field": "online_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "在线司机数"
+        },
+        {
+          "field": "completion_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "完单司机数"
+        },
+        {
+          "field": "response_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "应答司机数"
+        },
+        {
+          "field": "valid_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "有效司机数"
+        },
+        {
+          "field": "first_completion_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": "0",
+          "comment": "首次完单司机数"
+        },
+        {
+          "field": "total_subsidy_amount",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "总b补金额（元）= 营销表总奖励金额 + 卡券表总补贴金额"
+        },
+        {
+          "field": "merchant_subsidy_amount",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "商家b补金额（元）= 营销表商家补贴 + 卡券表商家补贴"
+        },
+        {
+          "field": "tr_value",
+          "type": "decimal(20,6)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "TR值（品牌抽佣用：GMV * tr_value）"
+        },
+        {
+          "field": "tr_total",
+          "type": "decimal(20,6)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "总TR值（总抽佣用：GMV * tr_total）"
+        },
+        {
+          "field": "total_commission",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "总抽佣 = GMV * tr_total"
+        },
+        {
+          "field": "brand_commission",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "品牌抽佣 = GMV * tr_value"
+        },
+        {
+          "field": "merchant_coupon_sales_revenue",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "商家券后售卡收入（元）"
+        },
+        {
+          "field": "response_rate",
+          "type": "decimal(10,6)",
+          "null": "YES",
+          "key": "",
+          "default": "0.000000",
+          "comment": "应答率 = 应答量 / 乘客发单量"
+        },
+        {
+          "field": "pk_success_rate",
+          "type": "decimal(10,6)",
+          "null": "YES",
+          "key": "",
+          "default": "0.000000",
+          "comment": "PK成功率（直接取订单表均值）"
+        },
+        {
+          "field": "transaction_rate",
+          "type": "decimal(10,6)",
+          "null": "YES",
+          "key": "",
+          "default": "0.000000",
+          "comment": "成交率 = 完单量 / 乘客发单量"
+        },
+        {
+          "field": "average_order_price",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "单均价 = GMV / 完单量"
+        },
+        {
+          "field": "completion_rate_after_response",
+          "type": "decimal(10,6)",
+          "null": "YES",
+          "key": "",
+          "default": "0.000000",
+          "comment": "应答后完单率 = 完单量 / 应答量"
+        },
+        {
+          "field": "per_capita_online_duration_hour",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "人均在线时长（小时） = 在线时长 / 在线司机数"
+        },
+        {
+          "field": "service_duration_ratio",
+          "type": "decimal(10,6)",
+          "null": "YES",
+          "key": "",
+          "default": "0.000000",
+          "comment": "服务时长占比 = 服务时长 / 在线时长"
+        },
+        {
+          "field": "per_capita_completion_count",
+          "type": "decimal(10,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "人均完单量 = 完单量 / 完单司机数"
+        },
+        {
+          "field": "completion_per_hour",
+          "type": "decimal(10,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "每小时完单量（直接取运力表均值）"
+        },
+        {
+          "field": "forced_co_subsidy_coupon_gmv",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "强制共补卡券活动的总订单GMV（补贴类型=\"强制共补\"）"
+        },
+        {
+          "field": "forced_co_subsidy_zero_tr_activity_gmv",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "强制共补0TR营销活动的总订单GMV（奖励模板=\"0TR\"且补贴类型=\"强制共补\"）"
+        },
+        {
+          "field": "co_subsidy_gmv",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": "0.0000",
+          "comment": "共补GMV = 强制共补卡券GMV + 强制共补0TR营销GMV"
+        },
+        {
+          "field": "total_tr",
+          "type": "decimal(20,6)",
+          "null": "YES",
+          "key": "",
+          "default": "0.000000",
+          "comment": "总TR = tr_total（直接取值）"
+        },
+        {
+          "field": "merchant_tr",
+          "type": "decimal(20,6)",
+          "null": "YES",
+          "key": "",
+          "default": "0.000000",
+          "comment": "商家TR = tr_value（直接取值）"
+        },
+        {
+          "field": "merchant_single_subsidy_rate",
+          "type": "decimal(10,6)",
+          "null": "YES",
+          "key": "",
+          "default": "0.000000",
+          "comment": "商家独补率 = 商家b补金额 / GMV"
+        },
+        {
+          "field": "merchant_card_sales_rate",
+          "type": "decimal(10,6)",
+          "null": "YES",
+          "key": "",
+          "default": "0.000000",
+          "comment": "商家售卡收入率 = 商家券后售卡收入 / GMV"
+        },
+        {
+          "field": "gross_profit",
+          "type": "decimal(20,6)",
+          "null": "YES",
+          "key": "",
+          "default": "0.000000",
+          "comment": "毛利 = 商家TR + 商家售卡收入率 - 商家独补率 - 1%"
+        },
+        {
+          "field": "created_time",
+          "type": "datetime",
+          "null": "YES",
+          "key": "",
+          "default": "CURRENT_TIMESTAMP",
+          "comment": "数据创建时间"
+        },
+        {
+          "field": "updated_time",
+          "type": "datetime",
+          "null": "YES",
+          "key": "",
+          "default": "CURRENT_TIMESTAMP",
+          "comment": "数据更新时间"
         }
       ]
     },
