@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-14T10:57:00.986155+08:00",
+  "generated_at": "2026-07-21T22:32:02.728114+08:00",
   "database": "dataReporting",
   "tables": [
     {
@@ -2043,7 +2043,7 @@
     {
       "name": "honghu_detail_data",
       "comment": "宏鹄详情数据汇总表（汇总数据）",
-      "column_count": 45,
+      "column_count": 44,
       "columns": [
         {
           "field": "id",
@@ -2219,7 +2219,7 @@
           "null": "YES",
           "key": "",
           "default": null,
-          "comment": "TR值（品牌抽佣用：GMV * tr_value）"
+          "comment": "品牌抽佣值"
         },
         {
           "field": "tr_total",
@@ -2227,23 +2227,7 @@
           "null": "YES",
           "key": "",
           "default": null,
-          "comment": "总TR值（总抽佣用：GMV * tr_total）"
-        },
-        {
-          "field": "total_commission",
-          "type": "decimal(20,4)",
-          "null": "YES",
-          "key": "",
-          "default": "0.0000",
-          "comment": "总抽佣 = GMV * tr_total"
-        },
-        {
-          "field": "brand_commission",
-          "type": "decimal(20,4)",
-          "null": "YES",
-          "key": "",
-          "default": "0.0000",
-          "comment": "品牌抽佣 = GMV * tr_value"
+          "comment": "总抽佣值"
         },
         {
           "field": "merchant_coupon_sales_revenue",
@@ -2387,7 +2371,7 @@
           "null": "YES",
           "key": "",
           "default": "0.000000",
-          "comment": "毛利 = 商家TR + 商家售卡收入率 - 商家独补率 - 1%"
+          "comment": "线上毛利率 = 商家TR + 商家售卡收入率 - 商家独补率 - 1%"
         },
         {
           "field": "created_time",
@@ -2404,6 +2388,14 @@
           "key": "",
           "default": "CURRENT_TIMESTAMP",
           "comment": "数据更新时间"
+        },
+        {
+          "field": "online_gross_profit",
+          "type": "double",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "线上毛利值 = 品牌抽佣 + 商家券后售卡收入 - (营销表+卡券表商家补贴) - GMV*1%"
         }
       ]
     },

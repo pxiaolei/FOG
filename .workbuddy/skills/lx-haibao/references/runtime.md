@@ -38,14 +38,14 @@ config/fog_config.yaml
 ./check_runtime.sh
 ./haibao.sh --check
 ./haibao.sh --check-brand-locks
-./haibao.sh --check-providers
+./haibao.sh --check-providers --confirmed-network
 ```
 
 `--check` 验证依赖、模板示例图、品牌 Logo、品牌二维码和源二维码解码，不调用图片 API。
 
 `--check-brand-locks` 验证品牌模板绑定、真实 Logo/二维码素材、源二维码解码，以及 overlay 坐标是否存在。默认 `hybrid` 模式依赖 `qr_overlay` 贴真实二维码，但不依赖 `logo_overlay`；缺失按实际影响显示 warning 或 error。
 
-`--check-providers` 只检查配置和 base URL 连通性，不调用图片生成接口。
+`--check-providers` 只检查配置和 base URL 连通性，不调用图片生成接口，但会联网，因此必须显式追加 `--confirmed-network`。该确认不授权生图；普通 `--confirmed` 也不能替代网络确认。
 
 最小真实 provider 生图检查必须显式确认，可能产生费用：
 

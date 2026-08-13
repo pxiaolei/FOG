@@ -10,14 +10,10 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
-
-EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xls"}
-
 
 def find_project_root(start: Path | None = None) -> Path:
     current = (start or Path.cwd()).resolve()
@@ -124,22 +120,6 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
         base = resolve_path(zhutichaibiao.get("work_dir"), "workspace/01主体拆表")
         dirs.extend([base, base / "输入", base / "输出", base / "原表存档", base / "处理日志"])
 
-    dapanribao = config.get("lx_dapanribao", {})
-    if isinstance(dapanribao, dict):
-        dirs.append(resolve_path(dapanribao.get("output_dir"), "workspace/03数据报表/日报"))
-
-    hhbbu = config.get("lx_hhbbu", {})
-    if isinstance(hhbbu, dict):
-        dirs.append(resolve_path(hhbbu.get("output_dir"), "workspace/02数据导入/处理日志/lx-hhbbu"))
-        local_hhdata = hhbbu.get("local_hhdata", {})
-        if isinstance(local_hhdata, dict):
-            excel_config = local_hhdata.get("excel_file", {})
-            if not isinstance(excel_config, dict):
-                excel_config = {}
-            backup_dir = excel_config.get("backup_dir") or local_hhdata.get("backup_dir")
-            if backup_dir:
-                dirs.append(resolve_path(backup_dir))
-
     haibao = config.get("lx_haibao", {})
     if isinstance(haibao, dict):
         dirs.append(resolve_path(haibao.get("output_dir"), "workspace/09端外海报图/产出图"))
@@ -163,12 +143,13 @@ def workspace_dirs(config: dict[str, Any]) -> list[Path]:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    if args.dry_run:
+    if args.dry_run or not args.confirmed:
         config = load_yaml(CONFIG_PATH) or load_yaml(EXAMPLE_PATH)
         for path in workspace_dirs(config):
-            print(f"[dry-run] create {path}")
+            print(f"[preview] create {path}")
         if not CONFIG_PATH.exists():
-            print(f"[dry-run] would create config/fog_config.yaml from {EXAMPLE_PATH}")
+            print(f"[preview] would create config/fog_config.yaml from {EXAMPLE_PATH}")
+        print("preview only; append --confirmed to create files and directories")
         return 0
 
     created = ensure_config()
@@ -184,24 +165,41 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_migrate_config(args: argparse.Namespace) -> int:
-    created = ensure_config()
-    if created:
-        print("已创建 config/fog_config.yaml，请填写个人配置。")
-        return 1
+    if not CONFIG_PATH.exists():
+        if args.dry_run or not args.confirmed:
+            print(f"preview only; would create config/fog_config.yaml from {EXAMPLE_PATH}")
+            return 0
+        created = ensure_config()
+        if created:
+            print("已创建 config/fog_config.yaml，请填写个人配置。")
+            return 1
     current = load_yaml(CONFIG_PATH)
     defaults = load_yaml(EXAMPLE_PATH)
     migrated = merge_missing(current, defaults)
     if migrated == current:
         print("config/fog_config.yaml 已包含当前模板需要的配置键。")
         return 0
-    if args.dry_run:
-        print("dry-run: 将向 config/fog_config.yaml 补充模板新增配置键，不覆盖已有值。")
+    if args.dry_run or not args.confirmed:
+        print("preview: 将向 config/fog_config.yaml 补充模板新增配置键，不覆盖已有值。")
+        print("preview only; append --confirmed to update the config")
         return 0
-    backup = CONFIG_PATH.with_suffix(".yaml.bak")
+    backup = next_backup_path(CONFIG_PATH)
     shutil.copy2(CONFIG_PATH, backup)
     save_yaml(CONFIG_PATH, migrated)
+    if load_yaml(CONFIG_PATH) != migrated:
+        shutil.copy2(backup, CONFIG_PATH)
+        raise RuntimeError("配置写后读回不一致，已从本次备份恢复")
     print(f"已补充新增配置键，旧配置备份到: {backup}")
     return 0
+
+
+def next_backup_path(path: Path) -> Path:
+    candidate = path.with_suffix(path.suffix + ".bak")
+    index = 0
+    while candidate.exists():
+        index += 1
+        candidate = path.with_suffix(path.suffix + f".bak.{index}")
+    return candidate
 
 
 def add_check(items: list[tuple[str, str, str]], status: str, name: str, message: str) -> None:
@@ -241,10 +239,6 @@ def lark_cli_exists(config: dict[str, Any]) -> bool:
     return workbuddy_lark_cli_path().exists()
 
 
-def is_excel_candidate(path: Path) -> bool:
-    return path.is_file() and path.suffix.lower() in EXCEL_SUFFIXES and not path.name.startswith("~$")
-
-
 def cmd_check(_: argparse.Namespace) -> int:
     if not CONFIG_PATH.exists():
         print(f"[error] config.fog_config: 不存在 {CONFIG_PATH}")
@@ -269,10 +263,7 @@ def cmd_check(_: argparse.Namespace) -> int:
         if not zhutichaibiao.get("default_persons"):
             add_check(items, "warning", "lx_zhutichaibiao.default_persons", "未配置默认对接人")
 
-    dailyreport = config.get("lx_dapanribao", {}) or {}
-    publish_backend = str(dailyreport.get("publish_backend") or "")
-
-    if enabled.get("lx_feishudocs") or publish_backend == "lx-feishudocs":
+    if enabled.get("lx_feishudocs"):
         skill_path = PROJECT_ROOT / ".workbuddy" / "skills" / "lx-feishudocs" / "SKILL.md"
         if skill_path.exists():
             add_check(items, "ok", "skill.lx-feishudocs", f"已安装: {skill_path}")
@@ -311,47 +302,6 @@ def cmd_check(_: argparse.Namespace) -> int:
             add_check(items, "ok", "lx_haibao.image_api", "至少一个 provider 已配置 API Key")
         else:
             add_check(items, "warning", "lx_haibao.image_api", "未配置图片 API Key；海报生成会不可用")
-
-    if enabled.get("lx_hhbbu"):
-        hhbbu = config.get("lx_hhbbu", {}) or {}
-        if not isinstance(hhbbu, dict):
-            hhbbu = {}
-        required(items, "lx_hhbbu.output_dir", hhbbu.get("output_dir"), "warning")
-        local_hhdata = hhbbu.get("local_hhdata", {}) if isinstance(hhbbu, dict) else {}
-        if not isinstance(local_hhdata, dict):
-            local_hhdata = {}
-        require_local = bool(local_hhdata.get("required_before_run"))
-        severity = "error" if require_local else "warning"
-        target = str(local_hhdata.get("target") or "excel_file").strip()
-        if target not in ("excel_file", "database_table"):
-            add_check(items, "error", "lx_hhbbu.local_hhdata.target", "只能是 excel_file 或 database_table")
-        elif target == "excel_file":
-            excel_config = local_hhdata.get("excel_file", {})
-            if not isinstance(excel_config, dict):
-                excel_config = {}
-            configured_file = str(excel_config.get("file") or local_hhdata.get("file") or "").strip()
-            if configured_file:
-                path = resolve_path(configured_file)
-                if is_excel_candidate(path):
-                    add_check(items, "ok", "lx_hhbbu.local_hhdata.excel_file.file", f"已找到 Excel: {path}")
-                else:
-                    add_check(items, severity, "lx_hhbbu.local_hhdata.excel_file.file", f"未找到可用 Excel: {path}")
-            else:
-                add_check(items, severity, "lx_hhbbu.local_hhdata.excel_file.file", "未配置唯一 hhdata Excel 文件路径")
-        else:
-            database_table = local_hhdata.get("database_table", {})
-            if not isinstance(database_table, dict):
-                database_table = {}
-            database_config = config.get("database", {})
-            if not isinstance(database_config, dict):
-                database_config = {}
-            required(items, "database.host", database_config.get("host"), "error")
-            required(items, "database.database", database_config.get("database"), "error")
-            required(items, "database.user", database_config.get("user"), "error")
-            required(items, "database.password", database_config.get("password"), "error")
-            required(items, "lx_hhbbu.local_hhdata.database_table.table", database_table.get("table"), severity)
-            required(items, "lx_hhbbu.local_hhdata.database_table.city_dim_table", database_table.get("city_dim_table"), severity)
-            required(items, "lx_hhbbu.local_hhdata.database_table.brand_dim_table", database_table.get("brand_dim_table"), severity)
 
     if enabled.get("lx_nongfu"):
         nongfu = config.get("lx_nongfu", {}) or {}
@@ -396,12 +346,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_parser = subparsers.add_parser("init", help="创建配置文件和 workspace 目录")
     init_parser.add_argument("--dry-run", action="store_true", help="只预览，不写入")
+    init_parser.add_argument("--confirmed", action="store_true", help="确认创建配置文件和 workspace 目录")
 
     check_parser = subparsers.add_parser("check", help="检查 config/fog_config.yaml")
     check_parser.set_defaults(func=cmd_check)
 
     migrate_parser = subparsers.add_parser("migrate-config", help="补充 fog_config.yaml 新增配置键")
     migrate_parser.add_argument("--dry-run", action="store_true", help="只预览，不写入")
+    migrate_parser.add_argument("--confirmed", action="store_true", help="确认备份并更新 config/fog_config.yaml")
 
     init_parser.set_defaults(func=cmd_init)
     migrate_parser.set_defaults(func=cmd_migrate_config)
@@ -411,9 +363,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not args.command:
+    if not args.command or not hasattr(args, "func"):
         parser.print_help()
         return 0
+    if getattr(args, "dry_run", False) and getattr(args, "confirmed", False):
+        parser.error("--dry-run 和 --confirmed 不能同时使用")
     return args.func(args)
 
 

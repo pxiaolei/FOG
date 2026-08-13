@@ -13,6 +13,9 @@ lx_shujuku 公司数据库客户端
 3. 返回 401 时自动重新登录
 """
 
+from __future__ import annotations
+
+import hashlib
 import json
 import logging
 import re
@@ -24,7 +27,13 @@ from urllib.request import Request, build_opener, ProxyHandler
 from urllib.error import HTTPError, URLError
 
 from .operator_brand import build_mabiao_mapping, normalize_operator_brand_rows
-from .query_policy import ensure_readonly_sql, validate_identifier, validate_limit
+from .query_policy import (
+    analyze_query_shape,
+    ensure_readonly_sql,
+    top_level_order_columns,
+    validate_identifier,
+    validate_limit,
+)
 from .schema import SchemaCatalog
 
 logger = logging.getLogger(__name__)
@@ -270,14 +279,21 @@ class DataReportingClient:
 
     # ---- SQL 查询 ----
 
-    def prepare_sql(self, sql: str, enforce_table_whitelist: bool = True) -> str:
+    def prepare_sql(
+        self,
+        sql: str,
+        enforce_table_whitelist: bool = True,
+        default_limit: int | None = None,
+        append_default_limit: bool = True,
+    ) -> str:
         """执行前标准化并校验 SQL。"""
         allowed_tables = self.schema.table_names if enforce_table_whitelist else None
         return ensure_readonly_sql(
             sql,
-            default_limit=self.default_limit,
+            default_limit=self.default_limit if default_limit is None else default_limit,
             max_limit=self.max_limit,
             allowed_tables=allowed_tables,
+            append_default_limit=append_default_limit,
         )
 
     def execute(
@@ -285,6 +301,7 @@ class DataReportingClient:
         sql: str,
         auto_retry: bool = True,
         enforce_table_whitelist: bool = True,
+        default_limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """
         执行只读 SQL 查询并返回结果。
@@ -299,7 +316,11 @@ class DataReportingClient:
         Raises:
             RuntimeError: 查询失败时抛出
         """
-        safe_sql = self.prepare_sql(sql, enforce_table_whitelist=enforce_table_whitelist)
+        safe_sql = self.prepare_sql(
+            sql,
+            enforce_table_whitelist=enforce_table_whitelist,
+            default_limit=default_limit,
+        )
         return self._execute_prepared_sql(safe_sql)
 
     def execute_audited(
@@ -308,18 +329,33 @@ class DataReportingClient:
         question: str = "",
         metric: str = "",
         enforce_table_whitelist: bool = True,
+        default_limit: int | None = None,
     ) -> dict[str, Any]:
         """执行查询并返回可用于文档生成的结构化证据包。"""
         tz = timezone(timedelta(hours=8))
         started_at = datetime.now(tz)
         started_monotonic = time.monotonic()
-        safe_sql = self.prepare_sql(sql, enforce_table_whitelist=enforce_table_whitelist)
+        metric_contract = self._metric_contract(metric)
+        safe_sql = self.prepare_sql(
+            sql,
+            enforce_table_whitelist=enforce_table_whitelist,
+            default_limit=default_limit,
+        )
         rows = self._execute_prepared_sql(safe_sql)
         duration_ms = round((time.monotonic() - started_monotonic) * 1000, 3)
+        shape = analyze_query_shape(safe_sql)
+        effective_limit = shape["top_level_limit"]
+        possible_truncation = bool(
+            effective_limit is not None and len(rows) >= effective_limit
+        )
+        is_complete: bool | None = None if possible_truncation else True
+        warnings = self._query_warnings(safe_sql)
+        if possible_truncation:
+            warnings.append("返回行数已命中顶层 LIMIT；结果可能被截断，不能声明为完整结果")
 
-        return {
+        package = {
             "type": "lx_shujuku.query_run",
-            "version": 1,
+            "version": 2,
             "executed_at": started_at.isoformat(),
             "duration_ms": duration_ms,
             "database": "dataReporting",
@@ -328,9 +364,220 @@ class DataReportingClient:
             "metric": metric,
             "sql": sql,
             "safe_sql": safe_sql,
+            "result_mode": "limited",
+            "requested_limit": default_limit,
+            "effective_limit": effective_limit,
             "row_count": len(rows),
+            "returned_rows": len(rows),
+            "total_rows": None,
+            "is_complete": is_complete,
+            "possible_truncation": possible_truncation,
+            "order_by_present": shape["has_top_level_order_by"],
             "rows": rows,
-            "warnings": self._query_warnings(safe_sql),
+            "result_sha256": self._rows_sha256(rows),
+            "schema_snapshot": self._schema_snapshot(),
+            "metric_contract": metric_contract,
+            "verification": {
+                "method": "limit_boundary",
+                "passed": not possible_truncation,
+            },
+            "warnings": warnings,
+        }
+        return package
+
+    def execute_full_audited(
+        self,
+        sql: str,
+        question: str = "",
+        metric: str = "",
+        enforce_table_whitelist: bool = True,
+        page_size: int = 500,
+        max_rows: int = 10000,
+    ) -> dict[str, Any]:
+        """通过稳定排序、双遍分页和前后计数返回可验证的完整结果。"""
+        page_size = validate_limit(page_size, self.max_limit)
+        max_rows = _to_positive_int(max_rows, "max_rows")
+        metric_contract = self._metric_contract(metric)
+        tz = timezone(timedelta(hours=8))
+        started_at = datetime.now(tz)
+        started_monotonic = time.monotonic()
+        safe_sql = self.prepare_sql(
+            sql,
+            enforce_table_whitelist=enforce_table_whitelist,
+            append_default_limit=False,
+        )
+        if not safe_sql.lstrip().lower().startswith("select"):
+            raise RuntimeError("完整查询仅支持 SELECT")
+
+        shape = analyze_query_shape(safe_sql)
+        if shape["top_level_limit"] is not None:
+            raise RuntimeError("完整查询不能包含顶层 LIMIT；请交给 --full 分页")
+        order_columns = top_level_order_columns(safe_sql)
+        count_before = self._count_query_rows(safe_sql)
+        if count_before > max_rows:
+            raise RuntimeError(
+                f"完整查询预计返回 {count_before} 行，超过 --max-rows {max_rows}；"
+                "请缩小筛选范围或显式提高上限"
+            )
+        if count_before > 1 and not order_columns:
+            raise RuntimeError("多行完整查询必须使用简单字段组成的顶层 ORDER BY，保证分页顺序稳定")
+
+        first_rows, pages_per_pass = self._fetch_full_pages(
+            safe_sql, count_before, page_size, order_columns
+        )
+        second_rows, second_page_count = self._fetch_full_pages(
+            safe_sql, count_before, page_size, order_columns
+        )
+        count_after = self._count_query_rows(safe_sql)
+        first_hash = self._rows_sha256(first_rows)
+        second_hash = self._rows_sha256(second_rows)
+        verified = (
+            count_before == count_after == len(first_rows) == len(second_rows)
+            and first_hash == second_hash
+        )
+        if not verified:
+            raise RuntimeError(
+                "完整查询两次读回结果或前后计数不一致；数据可能在查询期间变化，"
+                "本次不输出为准确结果，请稍后重试"
+            )
+
+        duration_ms = round((time.monotonic() - started_monotonic) * 1000, 3)
+        warnings = self._query_warnings(safe_sql)
+        if order_columns:
+            warnings.append("查询服务不提供事务快照；已用稳定排序、双遍结果哈希和前后计数降低漂移风险")
+            verification_method = "ordered_double_read_with_count"
+        else:
+            warnings.append("查询服务不提供事务快照；单行结果已用双遍结果哈希和前后计数降低漂移风险")
+            verification_method = "single_row_double_read_with_count"
+        return {
+            "type": "lx_shujuku.query_run",
+            "version": 2,
+            "executed_at": started_at.isoformat(),
+            "duration_ms": duration_ms,
+            "database": "dataReporting",
+            "base_url": self.base_url,
+            "question": question,
+            "metric": metric,
+            "sql": sql,
+            "safe_sql": safe_sql,
+            "result_mode": "full",
+            "requested_limit": None,
+            "effective_limit": None,
+            "row_count": len(first_rows),
+            "returned_rows": len(first_rows),
+            "total_rows": count_before,
+            "is_complete": True,
+            "possible_truncation": False,
+            "order_by_present": bool(order_columns),
+            "order_columns": order_columns,
+            "rows": first_rows,
+            "result_sha256": first_hash,
+            "schema_snapshot": self._schema_snapshot(),
+            "metric_contract": metric_contract,
+            "verification": {
+                "method": verification_method,
+                "passed": True,
+                "count_before": count_before,
+                "count_after": count_after,
+                "verification_passes": 2,
+                "pages_per_pass": pages_per_pass,
+                "second_pass_pages": second_page_count,
+                "second_pass_sha256": second_hash,
+            },
+            "warnings": warnings,
+        }
+
+    def _count_query_rows(self, safe_sql: str) -> int:
+        count_sql = (
+            "SELECT COUNT(*) AS __lx_total_rows FROM "
+            f"({safe_sql}) AS __lx_full_count LIMIT 1"
+        )
+        rows = self._execute_prepared_sql(count_sql)
+        if not rows or "__lx_total_rows" not in rows[0]:
+            raise RuntimeError("完整查询计数失败：服务端未返回 __lx_total_rows")
+        try:
+            return int(rows[0]["__lx_total_rows"])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("完整查询计数失败：返回值不是整数") from exc
+
+    def _fetch_full_pages(
+        self,
+        safe_sql: str,
+        total_rows: int,
+        page_size: int,
+        order_columns: list[str],
+    ) -> tuple[list[dict[str, Any]], int]:
+        rows: list[dict[str, Any]] = []
+        page_count = 0
+        for offset in range(0, total_rows, page_size):
+            page_sql = f"{safe_sql} LIMIT {page_size} OFFSET {offset}"
+            page = self._execute_prepared_sql(page_sql)
+            if not page:
+                raise RuntimeError(f"完整查询在 OFFSET {offset} 提前结束")
+            rows.extend(page)
+            page_count += 1
+
+        if len(rows) != total_rows:
+            raise RuntimeError(
+                f"完整查询分页行数不一致：预期 {total_rows}，实际 {len(rows)}"
+            )
+        seen: set[tuple[str, ...]] = set()
+        for index, row in enumerate(rows, 1):
+            missing = [column for column in order_columns if column not in row]
+            if missing:
+                raise RuntimeError(
+                    f"完整查询第 {index} 行缺少 ORDER BY 字段: {', '.join(missing)}"
+                )
+            key = tuple(self._canonical_value(row[column]) for column in order_columns)
+            if key in seen:
+                raise RuntimeError(
+                    "完整查询的 ORDER BY 字段组合不唯一；请追加唯一键或足以唯一定位结果行的字段"
+                )
+            seen.add(key)
+        return rows, page_count
+
+    @staticmethod
+    def _canonical_value(value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+    @classmethod
+    def _rows_sha256(cls, rows: list[dict[str, Any]]) -> str:
+        payload = json.dumps(
+            rows,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    def _schema_snapshot(self) -> dict[str, Any]:
+        path = self._skill_dir() / "assets" / "schema.json"
+        raw = path.read_bytes()
+        schema_data = json.loads(raw.decode("utf-8"))
+        return {
+            "generated_at": schema_data.get("generated_at"),
+            "table_count": schema_data.get("table_count", len(schema_data.get("tables", []))),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        }
+
+    def _metric_contract(self, metric: str) -> dict[str, Any] | None:
+        if not metric:
+            return None
+        path = self._skill_dir() / "references" / "metrics_catalog.json"
+        raw = path.read_bytes()
+        catalog = json.loads(raw.decode("utf-8"))
+        metrics = catalog.get("metrics", {})
+        if metric not in metrics:
+            available = ", ".join(sorted(metrics))
+            raise RuntimeError(f"未知指标口径 ID: {metric}；可用指标: {available}")
+        definition = metrics[metric]
+        return {
+            "id": metric,
+            "display_name": definition.get("display_name", ""),
+            "catalog_version": catalog.get("version"),
+            "catalog_updated_at": catalog.get("updated_at"),
+            "catalog_sha256": hashlib.sha256(raw).hexdigest(),
         }
 
     def _execute_prepared_sql(self, safe_sql: str) -> list[dict[str, Any]]:

@@ -1,121 +1,93 @@
 # FOG 共享工作区协作说明
 
-> 目标受众：使用国内 WorkBuddy 的 Windows 同事，以及协助同事处理本仓的 AI Agent。本文档只描述分享给同事使用的 FOG 工作区，不包含维护者私人工作区、内部数据库迁移和个人凭证。
+> 本文件是面向国内 WorkBuddy 与 Windows 同事的共享治理入口。Skill 清单看 `SKILLS.md`，具体流程看对应 `SKILL.md`；维护者私人工作区、内部迁移和个人凭证不属于本仓。
 
-## 1. 项目定位
+## 1. 接手顺序与真源
 
-FOG 是 LXX 出行业务运营自动化 Skill 工作区，面向同事的共享版只包含可复用的工具、配置模板、共享 Skill 和空 workspace 目录结构。
+1. 确认仓根、分支和 `git status`，保留同事已有改动。
+2. 读取 `AGENT.md`、`SKILLS.md` 和目标 Skill 的完整 `SKILL.md`。
+3. 涉及业务文件时动态枚举真实文件名；不能只依赖受 `.gitignore` 影响的 Git 文件集合。
+4. 涉及数据库时先确认数据源、库/schema、权限和只读/写入边界。
 
-默认运行环境：
+真源分工：
 
-- Windows 电脑。
-- 国内 WorkBuddy，不默认具备 Codex、OpenAI `image_gen`、Mac 本机路径或维护者私有脚本。
-- 能跨平台运行的 Python 脚本、`.cmd`、PowerShell 说明优先；遇到只适合维护者本机的说明时，先停下来确认，不要照搬执行。
+- `AGENT.md`：长期共享规则，不维护手写 Skill 大表。
+- `SKILLS.md`：由共享仓真实目录生成的索引。
+- 各 `SKILL.md`：输入、输出、安全边界和验收流程。
+- `config/fog_config.yaml.example`：可共享配置字段模板。
+- 操作者自己的 `config/fog_config.yaml`：真实配置，保持 gitignored。
 
-核心流程：
+## 2. 项目与运行边界
 
-```text
-配置检查 -> 业务文件放入 workspace -> 调用对应 Skill -> dry-run 预览 -> 确认后生成输出或写入飞书普通表格
+FOG 是 LXX 出行业务运营自动化的同事共享工作区，只包含可复用 Skill、跨平台工具、配置模板和空 workspace 结构。
+
+- 默认环境为 Windows + 国内 WorkBuddy，不假设具备 Codex、OpenAI `image_gen`、Mac 绝对路径或维护者私有脚本。
+- 优先提供 Python、PowerShell 和 `.cmd` 入口；发现 Codex-only、Mac-only 或维护者配置依赖时先停下，不照搬执行。
+- 标准流程为 `配置检查 -> 枚举输入 -> dry-run -> 明确确认 -> 写入/输出 -> 读回验收`。
+- 内部导入、数据库迁移、维护者闭环和私人 Skill 不属于共享版。
+
+## 3. 配置与凭证安全
+
+- 仓库不得包含真实账号、token、Cookie、数据库密码、邮箱授权码、个人路径、业务原表、运行输出或缓存。
+- 真实配置只放 `config/fog_config.yaml`；不得写入 `SKILL.md`、脚本、日志、命令参数或 Git。
+- 新增共享配置项时同步更新 example、相关 Skill 文档和检查逻辑。
+- 不新增面向同事的 per-Skill 真实配置入口；统一从根配置读取。
+- 外部 ZIP/附件必须校验路径穿越、符号链接、文件类型、大小、成员数、压缩比和重复输出名。
+
+## 4. Skill 治理
+
+真实 Skill 目录是 `.workbuddy/skills/<skill-name>/`。索引生成和检查命令：
+
+```bash
+python3 tools/generate_skill_index.py
+python3 tools/generate_skill_index.py --check
 ```
 
-共享版不携带真实账号、token、数据库密码、个人路径、业务原表、运行输出、缓存和本地私有 Skill。
+- 标准共享 Skill 的 frontmatter 只含 `name`、`description`，并具备 `agents/openai.yaml` 和唯一的 `## 执行契约`、`### 输入`、`### 输出`、`### 验收`。
+- `SKILLS.md` 必须与真实共享目录一致；维护者私有 Skill 不以“历史保留”名义滞留在 FOG。
+- 高风险写入、认证会话和维护者能力不得允许无条件隐式调用。
+- 修改 Skill 后必须重生成索引，并运行该 Skill 自身测试或 smoke。
 
-## 2. 共享 Skill 清单
+`lx_shujuku` 固定规则：
 
-下表按当前 `FOG` 仓库里的共享目录描述。维护者从私人 `p-fog` 同步更新时，只会覆盖白名单内容；已有但未纳入白名单的历史 Skill 不代表每次都会自动更新。
+- 真源文件为 `SKILL.md`、`assets/schema.json`、`references/table_catalog.md`；表数、字段和注释不得手猜。
+- SQL 生成和生产查询性能规则见 `references/sql-query-performance.md`。
+- schema 更新顺序为 `schema-diff -> refresh-schema --yes -> describe/单测 -> schema-diff`。
+- 默认受限查询命中上限时只能称“可能截断”；完整结果使用 `query --full`，只有前后计数、稳定唯一排序、双遍分页 hash 和返回总数全部一致时才能声明完整。
+- 刷新产生的 `*.bak.*` 是本地备份，不提交。
 
-| Skill | 用途 | 主要输入/配置 |
-|---|---|---|
-| `lx_shujuku` | 查询公司 dataReporting，只读访问业务表和 `operator_brand` 码表 | `config/fog_config.yaml` |
-| `lxx_share` | 共享 Python 基础模块，供其他 Skill 复用 | 不直接触发 |
-| `lx-init` | 初始化和旧兼容检查入口；新流程优先用 `tools/fog.py` | `config/fog_config.yaml` |
-| `lx-zhutichaibiao` | 按运营主体、城市、品牌拆分 Excel | workspace 文件 |
-| `lx-feishudocs` | 飞书普通电子表格创建、读取、写入 | 飞书配置 |
-| `lx-biaogetongbu` | A 表到 B 表同步，支持按 key 回填 | Excel/飞书表格 |
-| `lx-tongzhi` | 生成商家、司机、线下渠道通知，并做禁词检查 | 业务事实和模板 |
-| `lx-nongfu` | 农夫协作文档编排：拆分、通知、品牌城市回填 | workspace 文件和飞书配置 |
-| `lx-dapanribao` | 生成运营日报和飞书普通表格发布计划 | 数据库只读配置 |
-| `lx-hhbbu` | 从公司库按日期、城市、品牌导出 B补和售卡商家收入数据 | 公司库只读配置 |
-| `lx-zhoubao` | 生成周报所需的日/周聚合和报告 | 数据库只读配置 |
-| `lx-celuehuodong` | 策略活动表处理、免佣卡和后台导入文件生成 | 活动表/模板文件 |
-| `lx-haibao` | 根据活动 TXT 生成司机活动海报 | 图片 API 和品牌配置 |
-| `lx-yuedufandian` | 月度返点规则留档、源 Excel 入库、计算并输出结果 | 返点源表和规则文件 |
+## 5. 数据与操作准确性
 
-内部导入、共补入库、个人数据库迁移等 Skill 不属于共享版；不要在共享工作区里假设存在。
+- 只报告实际读取或执行结果；失败、无权限、无结果、截断和 schema 漂移分别说明，不补假数据。
+- 查询至少记录数据源、时间范围、过滤条件、结果粒度、总数、返回行数、分页和完整性状态。
+- 同事的数据库查询范围仅限通过 `lx_shujuku` 只读访问公司 `dataReporting`；不得要求、配置或使用维护者的 RDS 连接，也不得把 RDS 表、索引或操作流程写成共享版前提。
+- 写飞书、批量回填、移动文件、生成图片、付费 API 和数据库写入默认先 dry-run，真实动作需要明确确认和读回。
+- 原始业务文件不覆盖；失败、部分成功或未确认时不归档源文件。
+- Windows 使用面优先保证 `tools/windows/install.ps1` 和 `tools/windows/check.ps1` 可用。
 
-`lx_shujuku` 共享仓固定规则：
+### 公司库只读 SQL 性能门禁
 
-- 本仓位置固定为 `.workbuddy/skills/lx_shujuku/`，入口是 `SKILL.md`。
-- 结构文档只认三处：`SKILL.md` 的摘要表、`assets/schema.json` 的机器 schema、`references/table_catalog.md` 的人读目录；表数、字段数、字段注释必须来自线上 schema 或这三个文件，不能凭记忆改。
-- 公司库新增表或字段时，先用 `scripts/db_tools.py schema-diff` 对比线上，再用 `scripts/db_tools.py refresh-schema --yes` 刷新；不要手工猜字段。
-- 共享仓默认不携带真实 `config/fog_config.yaml`；需要 live schema 或查询时，使用操作者自己的根配置文件，不要把真实账号密码写入仓库。
-- 刷新会生成 `assets/schema.json.bak.*` 和 `references/table_catalog.md.bak.*`，这些是本地备份，保持 gitignored，不提交。
-- 验收至少跑：`schema-diff` 应归零、`describe <新增表>` 能在本地白名单模式返回字段、`PYTHONPATH=.workbuddy/skills/lx_shujuku/scripts python -m unittest discover -s .workbuddy/skills/lx_shujuku/tests` 通过，并扫描是否还有旧表数文案。
+- 生成 SQL 前先核对当前字段名、字段类型和 schema 漂移；涉及索引判断时还要核对完整索引列顺序。缓存 schema 和字段级 `PRI/MUL` 标记不能单独证明复合索引结构，也不能据此声称查询“已命中索引”。
+- `JOIN`、`WHERE` 默认使用可搜索的裸字段条件。候选连接或过滤字段上不得使用 `TRIM`、`CAST`、`CONVERT`、`COLLATE`、`UPPER`、`LOWER`、日期函数、算术表达式或前导通配 `LIKE '%x'` 来临时兼容数据。
+- JOIN 两侧字段的类型、字符集或排序规则不兼容时停止并报告；不得用运行时函数转换掩盖。`LEFT JOIN` 与 `INNER JOIN` 必须按业务语义选择，不得仅以性能为由互换。
+- 大表或数据量未知的事实表查询必须限定业务范围，优先提供时间范围及必要的品牌、城市等过滤，只查询所需字段，避免 `SELECT *`。日期范围优先使用半开区间；字符串日期字段必须先确认格式可比较。
+- 普通样例/Top N 查询使用合理 `LIMIT`；`LIMIT` 只限制返回量，不代表避免全表扫描。要求完整结果时必须走 `lx_shujuku query --full`。
+- 聚合查询只要求非聚合输出字段进入 `GROUP BY`；单值聚合可以不分组。`COUNT(*)` 只表示行数，不得替代业务指标求和。
+- 新增或修改的大表 JOIN、聚合查询在执行前先运行普通 `EXPLAIN`。大事实表出现未解释的 `key = NULL`、`type = ALL` 或扫描范围明显失控时停止执行。
+- 默认禁止使用 `EXPLAIN ANALYZE`、`FORCE INDEX` 或提出索引 DDL；需要这些动作时交由维护者联系技术/DBA处理。
 
-## 3. 配置边界
+## 6. Workspace 约定
 
-- 共享模板：`config/fog_config.yaml.example`
-- 每个人自己的真实配置：`config/fog_config.yaml`
-- 真实配置不得提交到 Git，也不得写进 `SKILL.md`、脚本或 README。
-- 新增共享配置项时，同时更新 `config/fog_config.yaml.example`、相关 Skill 文档和检查逻辑。
-- 不要新增面向同事的 per-Skill `assets/config.yaml` 真实配置入口；真实配置统一放在根配置里。
-- 配置项按用途拆分：共享模板只放字段、说明和空占位；个人账号、token、图片 API Key、飞书偏好、本地目录只放自己的 `config/fog_config.yaml`。
-- 如果某个 Skill 文档提到维护者私有配置、Codex-only 能力或 Mac 绝对路径，同事侧默认不可用，需要改成 WorkBuddy/Windows 可运行流程后再使用。
+`workspace/00todo/` 是未归类事项入口；已有业务区域包括主体拆表、数据导入、数据报表、数据分析、后台操作、端内宣传图、端外海报图、表格同步和农夫协作。
 
-## 4. 目录约定
+`workspace/` 只提交空目录占位。业务文件、处理日志、输出表、图片、压缩包和缓存不得进入 Git。
 
-```text
-FOG/
-├── config/
-│   └── fog_config.yaml.example
-├── .workbuddy/skills/
-├── tools/
-└── workspace/
-    ├── 00todo/
-    ├── 01主体拆表/
-    ├── 02数据导入/
-    ├── 03数据报表/
-    ├── 04数据分析/
-    ├── 05策略活动/
-    ├── 06后台操作/
-    ├── 07共补活动/
-    ├── 08端内宣传图/
-    ├── 09端外海报图/
-    ├── 10表格同步/
-    ├── 12农夫协作/
-    └── 13月度返点计算/
-```
+## 7. 私人源仓与共享仓
 
-`workspace/` 只提交空目录占位文件。真实业务文件、处理日志、输出表、图片、压缩包和缓存都不进入 Git。
-
-## 5. 操作规则
-
-- 修改前先读对应 `SKILL.md`、共享工具和配置模板。
-- 涉及业务文件时，先枚举真实文件名，再读取和处理。
-- 写入飞书普通表格、批量回填、移动文件、生成图片或可能产生费用的动作，默认先 dry-run。
-- 不编造数据库结果、文件内容、行号、命令输出或执行结果；读不到就直接说明。
-- 保持改动聚焦，不顺手重构无关代码。
-- Windows 同事使用面优先保证 `tools/windows/install.ps1` 和 `tools/windows/check.ps1` 可用。
-- 共享 Skill 的新增能力默认要考虑 Windows 路径、PowerShell/`.cmd` 调用、中文文件名和国内网络环境。
-- 生成图片、调用付费 API、写入飞书、批量改文件前必须先 dry-run 或让用户明确确认。
-
-## 6. 分享边界
-
-共享仓库只接收白名单内容：
-
-- `.workbuddy/skills/` 下由维护者在 `p-fog` 白名单中列出的共享 Skill
-- `tools/`
-- `config/fog_config.yaml.example`
-- 空 workspace 目录占位
-- 共享 README/AGENT 文档
-
-禁止分享：
-
-- `config/fog_config.yaml`
-- `config/personal_config.yaml`
-- `config/database.yaml`
-- `.env`
-- 业务数据、导入文件、输出文件、缓存、日志
-- 私人 skill、内部数据库迁移文件、个人路径和凭证
-
-同步前后都要执行敏感信息扫描，并检查 `git status`。
+- 私人 `p-fog` 与本仓是独立 Git 仓；共享内容由私人仓白名单同步，本仓不会接收全部私人文件。
+- 自动同步只新增或更新白名单文件，不删除本仓内容，不覆盖 `.gitignore`、`README.md`、`AGENT.md`、`SKILLS.md` 和本仓索引生成器。
+- 维护者发布共享快照使用私人仓 `lx-fogshare`；同事只使用本仓 `lx-update` 从 `pxiaolei/FOG` 的 `main` 分支检查和快进更新，不直接接触私人仓。
+- `lx-update` 必须先只读检查，再绑定远端提交显式确认；本地脏改动、分支分叉、未授权远端删除、受保护路径或未追踪文件冲突一律停止，不自动 stash、reset、清理或合并。固定退役清单中的删除也必须逐文件展示后才可随已确认 commit 快进。
+- 同步前目标仓必须干净；同步前后执行敏感信息扫描、逐文件 diff 和测试。
+- 同步工具不 commit、不 push；不得用 `git add -A` 夹带同事文件。
+- 禁止分享真实配置、`.env`、业务数据、输出、缓存、日志、私人 Skill、内部迁移、个人路径和凭证。

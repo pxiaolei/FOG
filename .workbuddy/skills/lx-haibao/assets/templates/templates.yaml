@@ -111,6 +111,9 @@ template08:
     padding_ratio: 0.08
     right_margin_ratio: 0.035
     bottom_margin_ratio: 0.015
+    footer_title: "扫描下载司机端"
+    footer_subtitle: "立享免佣和更多福利"
+    footer_note: "*最终解释权归平台所有"
 
 template09:
   display_name: "template09"

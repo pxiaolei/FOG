@@ -12,6 +12,7 @@ import csv
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -253,6 +254,21 @@ class FeishuSheetsClient:
             args.extend(["--spreadsheet-token", spreadsheet_token])
         return self.run(args)
 
+    def workbook_inspect(self, *, spreadsheet_token: str) -> dict[str, Any]:
+        return self.run(
+            [
+                "drive",
+                "+inspect",
+                "--as",
+                self.identity,
+                "--json",
+                "--url",
+                spreadsheet_token,
+                "--type",
+                "sheet",
+            ]
+        )
+
     def csv_put(
         self,
         *,
@@ -346,6 +362,20 @@ class FeishuSheetsClient:
         return properties
 
     @staticmethod
+    def workbook_identity(result: dict[str, Any]) -> dict[str, str]:
+        return {
+            "type": str(_find_nested(result, {"type", "file_type", "obj_type"}) or ""),
+            "token": str(
+                _find_nested(
+                    result,
+                    {"token", "file_token", "spreadsheet_token", "obj_token"},
+                )
+                or ""
+            ),
+            "title": str(_find_nested(result, {"title", "name"}) or ""),
+        }
+
+    @staticmethod
     def csv_rows(result: dict[str, Any]) -> list[list[str]]:
         annotated = _find_nested(result, {"annotated_csv"})
         if annotated is not None:
@@ -366,6 +396,206 @@ def _load_csv_file(path: str) -> str:
     return Path(path).expanduser().read_text(encoding="utf-8")
 
 
+_A1_CELL_RE = re.compile(r"^([A-Za-z]+)([1-9][0-9]*)$")
+
+
+def _column_number(column: str) -> int:
+    result = 0
+    for char in column.upper():
+        result = result * 26 + ord(char) - ord("A") + 1
+    return result
+
+
+def _column_name(number: int) -> str:
+    chars: list[str] = []
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        chars.append(chr(ord("A") + remainder))
+    return "".join(reversed(chars))
+
+
+def _csv_matrix_and_range(csv_text: str, start_cell: str) -> tuple[list[list[str]], str, int, int]:
+    match = _A1_CELL_RE.fullmatch(start_cell.strip())
+    if not match:
+        raise FeishuSheetsError(f"start-cell 必须是单个 A1 单元格，例如 A1；实际为 {start_cell!r}")
+    rows = _csv_to_rows(csv_text)
+    if not rows or not any(rows):
+        raise FeishuSheetsError("csv-put 的 CSV 必须至少包含一个单元格")
+    width = max(len(row) for row in rows)
+    matrix = [row + [""] * (width - len(row)) for row in rows]
+    start_column = _column_number(match.group(1))
+    start_row = int(match.group(2))
+    end_column = _column_name(start_column + width - 1)
+    end_row = start_row + len(matrix) - 1
+    normalized_start = f"{_column_name(start_column)}{start_row}"
+    return matrix, f"{normalized_start}:{end_column}{end_row}", start_column, start_row
+
+
+def _readback_is_complete(result: dict[str, Any]) -> bool:
+    truncated = _find_nested(result, {"truncated"})
+    complete = _find_nested(result, {"complete"})
+    has_more = _find_nested(result, {"has_more"})
+    return truncated is not True and complete is not False and has_more is not True
+
+
+def _verify_matrix(
+    expected: list[list[str]],
+    actual: list[list[str]],
+    *,
+    start_column: int,
+    start_row: int,
+) -> None:
+    missing = object()
+    row_count = max(len(expected), len(actual))
+    for row_offset in range(row_count):
+        expected_row: list[str] | None = expected[row_offset] if row_offset < len(expected) else None
+        actual_row: list[str] | None = actual[row_offset] if row_offset < len(actual) else None
+        column_count = max(len(expected_row or []), len(actual_row or []), 1)
+        for column_offset in range(column_count):
+            expected_value: object = (
+                expected_row[column_offset]
+                if expected_row is not None and column_offset < len(expected_row)
+                else missing
+            )
+            actual_value: object = (
+                actual_row[column_offset]
+                if actual_row is not None and column_offset < len(actual_row)
+                else missing
+            )
+            if expected_value == actual_value:
+                continue
+            cell = f"{_column_name(start_column + column_offset)}{start_row + row_offset}"
+            expected_display = "<缺失>" if expected_value is missing else repr(expected_value)
+            actual_display = "<缺失>" if actual_value is missing else repr(actual_value)
+            raise FeishuSheetsError(
+                f"写后读回不一致: {cell} 预期 {expected_display}，实际 {actual_display}"
+            )
+
+
+def _verify_created_workbook(
+    client: FeishuSheetsClient,
+    create_result: dict[str, Any],
+    *,
+    title: str,
+    folder_token: str,
+    headers: list[Any] | None = None,
+    values: list[list[Any]] | None = None,
+) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+    token = client.spreadsheet_token(create_result)
+    if not token:
+        raise FeishuSheetsError(f"创建结果缺少 spreadsheet_token: {_json_dumps(create_result)}")
+    info = client.workbook_info(spreadsheet_token=token)
+    sheets = client.sheet_properties(info)
+    if not sheets:
+        raise FeishuSheetsError(f"创建后读回缺少 sheet 列表: {_json_dumps(info)}")
+    identity = FeishuSheetsClient.workbook_identity(
+        client.workbook_inspect(spreadsheet_token=token)
+    )
+    if identity["type"] != "sheet":
+        raise FeishuSheetsError(
+            f"创建后读回类型不一致: 预期 'sheet'，实际 {identity['type']!r}"
+        )
+    if identity["token"] != token:
+        raise FeishuSheetsError(
+            f"创建后读回 token 不一致: 预期 {token!r}，实际 {identity['token']!r}"
+        )
+    if identity["title"] != title:
+        raise FeishuSheetsError(
+            f"创建后读回标题不一致: 预期 {title!r}，实际 {identity['title']!r}"
+        )
+    readback = {
+        "type": identity["type"],
+        "spreadsheet_token": identity["token"],
+        "title": identity["title"],
+        "sheet_count": len(sheets),
+        "requested_folder_token": folder_token,
+        "folder_readback": "API不提供创建后folder读回",
+    }
+    expected_rows = ([headers] if headers else []) + (values or [])
+    if expected_rows:
+        column_count = max(len(row) for row in expected_rows)
+        if column_count < 1:
+            raise FeishuSheetsError("创建初始矩阵至少需要一列")
+        sheet_id = str(sheets[0].get("sheet_id") or "")
+        if not sheet_id:
+            raise FeishuSheetsError("创建后读回缺少首个 sheet_id")
+        range_text = f"A1:{_column_name(column_count)}{len(expected_rows)}"
+        matrix_result = client.csv_get(
+            spreadsheet_token=token,
+            url="",
+            sheet_id=sheet_id,
+            sheet_name="",
+            range_text=range_text,
+        )
+        if not _readback_is_complete(matrix_result):
+            raise FeishuSheetsError(f"创建初始矩阵读回不完整: {range_text}")
+        expected = [[str(value) for value in row] for row in expected_rows]
+        actual = client.csv_rows(matrix_result)
+        _verify_matrix(expected, actual, start_column=1, start_row=1)
+        readback["initial_matrix"] = {
+            "range": range_text,
+            "row_count": len(expected),
+            "column_count": column_count,
+            "rows": actual,
+        }
+    return token, sheets, readback
+
+
+def _verified_csv_put(
+    client: FeishuSheetsClient,
+    *,
+    spreadsheet_token: str,
+    url: str,
+    sheet_id: str,
+    sheet_name: str,
+    start_cell: str,
+    csv_text: str,
+) -> dict[str, Any]:
+    if bool(spreadsheet_token) == bool(url):
+        raise FeishuSheetsError("csv-put 必须且只能提供 --spreadsheet-token 或 --url")
+    if bool(sheet_id) == bool(sheet_name):
+        raise FeishuSheetsError("csv-put 必须且只能提供 --sheet-id 或 --sheet-name")
+    expected, range_text, start_column, start_row = _csv_matrix_and_range(csv_text, start_cell)
+    write_result = client.csv_put(
+        spreadsheet_token=spreadsheet_token,
+        url=url,
+        sheet_id=sheet_id,
+        sheet_name=sheet_name,
+        start_cell=start_cell,
+        csv_text=csv_text,
+    )
+    read_result = client.csv_get(
+        spreadsheet_token=spreadsheet_token,
+        url=url,
+        sheet_id=sheet_id,
+        sheet_name=sheet_name,
+        range_text=range_text,
+    )
+    if not _readback_is_complete(read_result):
+        raise FeishuSheetsError(f"写后读回不完整: {range_text}")
+    actual = client.csv_rows(read_result)
+    _verify_matrix(
+        expected,
+        actual,
+        start_column=start_column,
+        start_row=start_row,
+    )
+    return {
+        "ok": True,
+        "write": write_result,
+        "readback": {
+            "range": range_text,
+            "row_count": len(expected),
+            "column_count": len(expected[0]),
+            "rows": actual,
+        },
+    }
+
+
+def _write_preview(command: str, **target: Any) -> dict[str, Any]:
+    return {"ok": True, "dry_run": True, "command": command, **target}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="FOG 飞书普通电子表格工具")
     parser.add_argument("--config-path", help="配置文件路径，默认 config/fog_config.yaml")
@@ -381,7 +611,9 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--folder-token", default="")
     create.add_argument("--headers-json", help="表头 JSON 数组")
     create.add_argument("--values-json", help="初始值 JSON 二维数组")
-    create.add_argument("--dry-run", action="store_true")
+    create_mode = create.add_mutually_exclusive_group()
+    create_mode.add_argument("--dry-run", action="store_true")
+    create_mode.add_argument("--confirmed", action="store_true", help="确认创建飞书工作簿")
 
     info = subparsers.add_parser("workbook-info", help="查看普通电子表格信息")
     info.add_argument("--spreadsheet-token", default="")
@@ -395,7 +627,9 @@ def build_parser() -> argparse.ArgumentParser:
     put.add_argument("--start-cell", default="A1")
     put.add_argument("--csv", default="")
     put.add_argument("--csv-file", default="")
-    put.add_argument("--dry-run", action="store_true")
+    put_mode = put.add_mutually_exclusive_group()
+    put_mode.add_argument("--dry-run", action="store_true")
+    put_mode.add_argument("--confirmed", action="store_true", help="确认写入飞书工作簿")
 
     get = subparsers.add_parser("csv-get", help="读取普通 sheet CSV")
     get.add_argument("--spreadsheet-token", default="")
@@ -407,7 +641,9 @@ def build_parser() -> argparse.ArgumentParser:
     smoke = subparsers.add_parser("smoke", help="创建普通表格并写读验证")
     smoke.add_argument("--title", default="")
     smoke.add_argument("--folder-token", default="")
-    smoke.add_argument("--dry-run", action="store_true")
+    smoke_mode = smoke.add_mutually_exclusive_group()
+    smoke_mode.add_argument("--dry-run", action="store_true")
+    smoke_mode.add_argument("--confirmed", action="store_true", help="确认创建、写入并读回 smoke 工作簿")
     return parser
 
 
@@ -426,50 +662,80 @@ def _print(value: Any) -> None:
 
 def main() -> None:
     args = build_parser().parse_args()
-    client = _client(args)
 
     if args.command == "status":
-        _print(client.status())
+        _print(_client(args).status())
         return
 
     if args.command == "create-workbook":
         headers = json.loads(args.headers_json) if args.headers_json else None
         values = json.loads(args.values_json) if args.values_json else None
-        _print(
-            client.workbook_create(
-                args.title,
-                folder_token=args.folder_token,
-                headers=headers,
-                values=values,
-                dry_run=args.dry_run,
+        if not args.confirmed:
+            _print(
+                _write_preview(
+                    "create-workbook",
+                    title=args.title,
+                    folder_token=args.folder_token,
+                    headers=headers,
+                    values=values,
+                )
             )
+            return
+        client = _client(args)
+        create_result = client.workbook_create(
+            args.title,
+            folder_token=args.folder_token,
+            headers=headers,
+            values=values,
         )
+        _, _, readback = _verify_created_workbook(
+            client,
+            create_result,
+            title=args.title,
+            folder_token=args.folder_token,
+            headers=headers,
+            values=values,
+        )
+        _print({"ok": True, "create": create_result, "readback": readback})
         return
 
     if args.command == "workbook-info":
-        _print(client.workbook_info(spreadsheet_token=args.spreadsheet_token, url=args.url))
+        _print(_client(args).workbook_info(spreadsheet_token=args.spreadsheet_token, url=args.url))
         return
 
     if args.command == "csv-put":
         csv_text = args.csv or (_load_csv_file(args.csv_file) if args.csv_file else "")
         if not csv_text:
             raise FeishuSheetsError("csv-put 必须提供 --csv 或 --csv-file")
+        if not args.confirmed:
+            _print(
+                _write_preview(
+                    "csv-put",
+                    spreadsheet_token=args.spreadsheet_token,
+                    url=args.url,
+                    sheet_id=args.sheet_id,
+                    sheet_name=args.sheet_name,
+                    start_cell=args.start_cell,
+                    row_count=len(_csv_to_rows(csv_text)),
+                )
+            )
+            return
         _print(
-            client.csv_put(
+            _verified_csv_put(
+                _client(args),
                 spreadsheet_token=args.spreadsheet_token,
                 url=args.url,
                 sheet_id=args.sheet_id,
                 sheet_name=args.sheet_name,
                 start_cell=args.start_cell,
                 csv_text=csv_text,
-                dry_run=args.dry_run,
             )
         )
         return
 
     if args.command == "csv-get":
         _print(
-            client.csv_get(
+            _client(args).csv_get(
                 spreadsheet_token=args.spreadsheet_token,
                 url=args.url,
                 sheet_id=args.sheet_id,
@@ -484,32 +750,37 @@ def main() -> None:
 
         title = args.title or f"FOG飞书普通表格Smoke-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         rows = [["检查项", "结果"], ["普通表格写入", "ok"]]
+        if not args.confirmed:
+            _print(
+                _write_preview(
+                    "smoke",
+                    title=title,
+                    folder_token=args.folder_token,
+                    start_cell="A1",
+                    rows=rows,
+                )
+            )
+            return
+        client = _client(args)
         create_result = client.workbook_create(
             title,
             folder_token=args.folder_token,
-            dry_run=args.dry_run,
         )
-        if args.dry_run:
-            _print({"dry_run": True, "create": create_result})
-            return
-        token = client.spreadsheet_token(create_result)
-        if not token:
-            raise FeishuSheetsError(f"创建结果缺少 spreadsheet_token: {_json_dumps(create_result)}")
-        info = client.workbook_info(spreadsheet_token=token)
-        sheets = client.sheet_properties(info)
-        if not sheets:
-            raise FeishuSheetsError(f"工作簿信息缺少 sheet 列表: {_json_dumps(info)}")
+        token, sheets, create_readback = _verify_created_workbook(
+            client,
+            create_result,
+            title=title,
+            folder_token=args.folder_token,
+        )
         sheet_id = sheets[0]["sheet_id"]
-        client.csv_put(
+        write_result = _verified_csv_put(
+            client,
             spreadsheet_token=token,
+            url="",
             sheet_id=sheet_id,
+            sheet_name="",
             start_cell="A1",
             csv_text=_rows_to_csv(rows),
-        )
-        read_result = client.csv_get(
-            spreadsheet_token=token,
-            sheet_id=sheet_id,
-            range_text="A1:B2",
         )
         _print(
             {
@@ -517,7 +788,9 @@ def main() -> None:
                 "spreadsheet_token": token,
                 "sheet_id": sheet_id,
                 "title": title,
-                "read_rows": client.csv_rows(read_result),
+                "create_readback": create_readback,
+                "write_readback": write_result["readback"],
+                "read_rows": write_result["readback"]["rows"],
             }
         )
 

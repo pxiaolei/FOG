@@ -9,11 +9,13 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from run_split_publish import TargetWorkbook  # noqa: E402
 from run_writeback import (  # noqa: E402
+    Change,
     build_table,
     build_writeback_plan,
     group_contiguous_changes,
     parse_operator_args,
     parse_update_columns,
+    verify_changes,
 )
 
 
@@ -146,6 +148,52 @@ class WritebackPlanTests(unittest.TestCase):
 
         self.assertEqual(len(groups), 1)
         self.assertEqual([item.cell for item in groups[0]], ["C3", "D3"])
+
+
+class WritebackReadbackTests(unittest.TestCase):
+    def change(self):
+        return Change(
+            operator="测试主体",
+            brand="方舟行",
+            city="武汉市",
+            column="首页侧边栏bannerID",
+            row_number=3,
+            column_number=3,
+            cell="C3",
+            old_value="",
+            new_value="123",
+        )
+
+    def test_verify_changes_accepts_value_only_with_stable_brand_city_key(self):
+        class FakeCli:
+            def sheets(self, args):
+                self.requested_range = args[args.index("--range") + 1]
+                if self.requested_range == "C3":
+                    return {"data": {"annotated_csv": "123"}}
+                return {"data": {"annotated_csv": "方舟行,武汉市,123"}}
+
+        checks = verify_changes(FakeCli(), "master-token", "sheet-id", [self.change()])
+
+        self.assertTrue(checks[0]["ok"])
+        self.assertEqual(checks[0]["actual_brand"], "方舟行")
+        self.assertEqual(checks[0]["actual_city"], "武汉市")
+
+    def test_verify_changes_rejects_brand_or_city_row_drift(self):
+        for label, row in (
+            ("brand", "错误品牌,武汉市,123"),
+            ("city", "方舟行,错误城市,123"),
+        ):
+            with self.subTest(label=label):
+                class FakeCli:
+                    def sheets(self, args):
+                        requested_range = args[args.index("--range") + 1]
+                        if requested_range == "C3":
+                            return {"data": {"annotated_csv": "123"}}
+                        return {"data": {"annotated_csv": row}}
+
+                checks = verify_changes(FakeCli(), "master-token", "sheet-id", [self.change()])
+
+                self.assertFalse(checks[0]["ok"])
 
 
 if __name__ == "__main__":

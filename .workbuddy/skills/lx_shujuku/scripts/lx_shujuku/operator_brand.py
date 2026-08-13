@@ -42,6 +42,7 @@ def build_mabiao_mapping(rows: list[dict[str, Any]]) -> dict[str, Any]:
     brand_to_zhuti: dict[str, set[str]] = defaultdict(set)
     brand_city_to_zhuti: dict[tuple[str, str], set[str]] = defaultdict(set)
     zhuti_to_person: dict[str, set[str]] = defaultdict(set)
+    operator_brand_rows: list[dict[str, str]] = []
 
     all_zhuti: set[str] = set()
     all_cities: set[str] = set()
@@ -53,6 +54,12 @@ def build_mabiao_mapping(rows: list[dict[str, Any]]) -> dict[str, Any]:
         brand = row["brand"]
         city = row["city"]
         person = row["contact_person"]
+        operator_brand_rows.append({
+            "operator": operator,
+            "brand": brand,
+            "city": city,
+            "contact_person": person,
+        })
 
         city_to_zhuti[city].add(operator)
         all_cities.add(city)
@@ -77,6 +84,7 @@ def build_mabiao_mapping(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "all_cities": sorted(all_cities),
         "all_brands": sorted(all_brands),
         "all_persons": sorted(all_persons),
+        "operator_brand_rows": operator_brand_rows,
     }
 
 

@@ -18,7 +18,7 @@ from utils import (
 )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="lx-init — FOG 项目初始化")
     parser.add_argument(
         "--config",
@@ -36,14 +36,21 @@ def parse_args() -> argparse.Namespace:
 
     for subparser in (init_workspace_parser, write_configs_parser, apply_parser):
         subparser.add_argument("--dry-run", action="store_true", default=argparse.SUPPRESS, help="只预览，不写文件")
+        subparser.add_argument("--confirmed", action="store_true", default=argparse.SUPPRESS, help="确认创建 workspace 或写入初始化报告")
     for subparser in (write_configs_parser, apply_parser):
         subparser.add_argument("--force", action="store_true", default=argparse.SUPPRESS, help="兼容旧参数；当前不会覆盖 per-Skill 配置")
-    return parser.parse_args()
+    apply_parser.add_argument("--overwrite", action="store_true", help="允许覆盖已存在的初始化报告")
+    args = parser.parse_args(argv)
+    if getattr(args, "dry_run", False) and getattr(args, "confirmed", False):
+        parser.error("--dry-run 和 --confirmed 不能同时使用")
+    return args
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv=None) -> int:
+    args = parse_args(argv)
     command = args.command or "check"
+    if command in {"init-workspace", "apply"} and not getattr(args, "confirmed", False):
+        args.dry_run = True
 
     try:
         project_root = find_project_root()
@@ -65,6 +72,15 @@ def main() -> int:
         print_results("Skill 配置分发", results, project_root)
         return 0
     if command == "apply":
+        if getattr(args, "confirmed", False):
+            try:
+                report_path = _resolve_report_path(config, project_root)
+            except ValueError as exc:
+                print(f"❌ 初始化失败: {exc}")
+                return 2
+            if report_path.exists() and not args.overwrite:
+                print(f"❌ 初始化报告已存在: {rel(report_path, project_root)}；覆盖需追加 --overwrite。")
+                return 2
         check_status = run_check(config, project_root, exit_on_error=False)
         if check_status != 0:
             print("\n⚠️ 配置存在错误，已停止写入。")
@@ -73,7 +89,7 @@ def main() -> int:
         print_results("Workspace 初始化", workspace_results, project_root)
         config_results = write_skill_configs(config, project_root, dry_run=args.dry_run, force=args.force)
         print_results("Skill 配置分发（兼容占位）", config_results, project_root)
-        if not args.dry_run:
+        if getattr(args, "confirmed", False):
             write_report(config, project_root, workspace_results + config_results)
         return 0
 
@@ -110,7 +126,7 @@ def write_skill_configs(
 
 
 def write_report(config: dict[str, Any], project_root: Path, results: list[WriteResult]) -> None:
-    report_path = project_root / config.get("init", {}).get("report_path", ".lx-init-report.md")
+    report_path = _resolve_report_path(config, project_root)
     lines = [
         "# lx-init 初始化报告",
         "",
@@ -137,6 +153,20 @@ def _resolve_config_path(project_root: Path, value: str) -> Path:
     if path.is_absolute():
         return path
     return project_root / path
+
+
+def _resolve_report_path(config: dict[str, Any], project_root: Path) -> Path:
+    value = config.get("init", {}).get("report_path", ".lx-init-report.md")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = project_root / path
+    root = project_root.resolve()
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("初始化报告路径必须位于项目目录内") from exc
+    return resolved
 
 
 if __name__ == "__main__":

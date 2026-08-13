@@ -1,0 +1,6 @@
+interface:
+  display_name: "飞书普通表格"
+  short_description: "创建、读写并回读验证飞书普通电子表格中的二维业务数据"
+  default_prompt: "使用 $lx-feishudocs 操作飞书普通电子表格，并在每次写入后读回关键范围验收。"
+policy:
+  allow_implicit_invocation: false

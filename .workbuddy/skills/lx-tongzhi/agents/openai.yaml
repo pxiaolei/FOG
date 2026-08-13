@@ -1,0 +1,6 @@
+interface:
+  display_name: "触达通知生成"
+  short_description: "按商家司机和线下渠道视角生成通知内容并校验禁词风险"
+  default_prompt: "使用 $lx-tongzhi 基于已确认事实生成指定人群和渠道的通知，并完成禁词风险校验。"
+policy:
+  allow_implicit_invocation: true

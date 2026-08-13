@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import posixpath
 import re
+import stat
 import sys
 import tempfile
 import time
@@ -38,6 +41,11 @@ from run_split_publish import (
 )
 
 
+MAX_ZIP_MEMBERS = 1_000
+MAX_ZIP_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+MAX_ZIP_COMPRESSION_RATIO = 200.0
+
+
 @dataclass
 class SplitEntry:
     batch: str
@@ -58,11 +66,57 @@ def source_label(path: Path) -> str:
     return re.sub(r"^\d{8}_\d{4}_", "", stem)
 
 
+def validate_zip_archive(path: Path) -> list[zipfile.ZipInfo]:
+    """Validate all members before any extraction or workbook parsing."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            members = archive.infolist()
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise NongfuError(f"无效 zip: {path}") from exc
+
+    if len(members) > MAX_ZIP_MEMBERS:
+        raise NongfuError(f"zip 成员数超过限制 {MAX_ZIP_MEMBERS}: {path}")
+
+    total_size = 0
+    normalized_names: set[str] = set()
+    for member in members:
+        raw_name = member.filename
+        normalized_slashes = raw_name.replace("\\", "/")
+        normalized = posixpath.normpath(normalized_slashes)
+        drive_prefix = re.match(r"^[A-Za-z]:/", normalized_slashes)
+        if normalized_slashes.startswith("/") or drive_prefix:
+            raise NongfuError(f"zip 包含绝对路径: {raw_name}")
+        if ".." in normalized_slashes.split("/"):
+            raise NongfuError(f"zip 包含路径穿越: {raw_name}")
+
+        unix_mode = member.external_attr >> 16
+        if stat.S_ISLNK(unix_mode):
+            raise NongfuError(f"zip 包含符号链接: {raw_name}")
+
+        duplicate_key = normalized.casefold()
+        if duplicate_key in normalized_names:
+            raise NongfuError(f"zip 包含重复输出名: {raw_name}")
+        normalized_names.add(duplicate_key)
+
+        total_size += member.file_size
+        if total_size > MAX_ZIP_UNCOMPRESSED_BYTES:
+            raise NongfuError(f"zip 未压缩总大小超过限制 {MAX_ZIP_UNCOMPRESSED_BYTES}: {path}")
+        if member.file_size:
+            ratio = member.file_size / max(member.compress_size, 1)
+            if ratio > MAX_ZIP_COMPRESSION_RATIO:
+                raise NongfuError(f"zip 成员压缩比异常: {raw_name}")
+
+        if not member.is_dir() and Path(normalized).suffix.lower() != ".xlsx":
+            raise NongfuError(f"zip 包含不允许的文件类型: {raw_name}")
+    return members
+
+
 def resolve_source_dir(path: Path, temp_dirs: list[tempfile.TemporaryDirectory[str]]) -> Path:
     if path.is_dir():
         return path
     if path.suffix.lower() != ".zip":
         raise NongfuError(f"输入不是目录或 zip: {path}")
+    validate_zip_archive(path)
     sibling = path.with_suffix("")
     if sibling.is_dir():
         return sibling
@@ -74,6 +128,41 @@ def resolve_source_dir(path: Path, temp_dirs: list[tempfile.TemporaryDirectory[s
         except UnicodeDecodeError as exc:
             raise NongfuError(f"zip 文件名编码无法自动解压，请先手动解压: {path}") from exc
     return Path(tmp.name)
+
+
+def read_zip_entries(path: Path, contact_person: str, include_lx: bool) -> list[SplitEntry]:
+    members = validate_zip_archive(path)
+    file_members = [member for member in members if not member.is_dir() and member.filename.lower().endswith(".xlsx")]
+    person_prefix = f"{contact_person}/"
+    person_members = [member for member in file_members if member.filename.replace("\\", "/").startswith(person_prefix)]
+    selected = person_members or [member for member in file_members if "/" not in member.filename.replace("\\", "/")]
+    if not selected:
+        raise NongfuError(f"未找到 {contact_person} 的已拆分 xlsx: {path}")
+
+    entries: list[SplitEntry] = []
+    batch_name = source_label(path)
+    with zipfile.ZipFile(path) as archive:
+        for member in sorted(selected, key=lambda item: item.filename):
+            display_path = Path(member.filename)
+            parsed = parse_operator_and_sheet(display_path, batch_name)
+            if parsed is None:
+                continue
+            operator, sheet_name = parsed
+            if operator == "LX" and not include_lx:
+                continue
+            with archive.open(member) as stream:
+                rows, column_count = read_workbook_rows(io.BytesIO(stream.read()))
+            entries.append(
+                SplitEntry(
+                    batch=batch_name,
+                    operator=operator,
+                    sheet_name=sheet_name,
+                    path=Path(f"{path}!/{member.filename}"),
+                    rows=rows,
+                    column_count=column_count,
+                )
+            )
+    return entries
 
 
 def person_dir(source_dir: Path, contact_person: str) -> Path:
@@ -110,7 +199,7 @@ def cell_value(value: Any) -> Any:
     return value
 
 
-def read_workbook_rows(path: Path) -> tuple[list[list[Any]], int]:
+def read_workbook_rows(path) -> tuple[list[list[Any]], int]:
     workbook = load_workbook(path, data_only=True, read_only=True)
     sheet = workbook.active
     rows: list[list[Any]] = []
@@ -124,7 +213,9 @@ def read_workbook_rows(path: Path) -> tuple[list[list[Any]], int]:
     return rows, max(max_col, max(len(row) for row in rows), 1)
 
 
-def collect_entries(paths: list[Path], contact_person: str, include_lx: bool) -> list[SplitEntry]:
+def collect_entries(
+    paths: list[Path], contact_person: str, include_lx: bool, *, confirmed: bool = False
+) -> list[SplitEntry]:
     temp_dirs: list[tempfile.TemporaryDirectory[str]] = []
     entries: list[SplitEntry] = []
     try:
@@ -134,6 +225,9 @@ def collect_entries(paths: list[Path], contact_person: str, include_lx: bool) ->
                 path = PROJECT_ROOT / path
             if not path.exists():
                 raise NongfuError(f"输入不存在: {path}")
+            if path.suffix.lower() == ".zip" and not confirmed:
+                entries.extend(read_zip_entries(path, contact_person, include_lx))
+                continue
             source_dir = resolve_source_dir(path, temp_dirs)
             batch_name = source_label(path)
             current_person_dir = person_dir(source_dir, contact_person)
@@ -205,10 +299,12 @@ def write_entry(cli: LarkCli, entry: SplitEntry, delay_seconds: float) -> None:
         raise NongfuError(f"{entry.operator}/{entry.sheet_name} 写后验证行数不一致：预期 {len(expected)}，实际 {len(actual_padded)}。")
     for row_index, expected_row in enumerate(expected):
         actual_row = actual_padded[row_index]
-        if [str(item) for item in actual_row[: min(3, entry.column_count)]] != [
-            str(item) for item in expected_row[: min(3, entry.column_count)]
-        ]:
-            raise NongfuError(f"{entry.operator}/{entry.sheet_name} 写后验证失败：第 {row_index + 1} 行前 3 列不一致。")
+        for column_index, expected_value in enumerate(expected_row):
+            if str(actual_row[column_index]) != str(expected_value):
+                raise NongfuError(
+                    f"{entry.operator}/{entry.sheet_name} 写后验证失败："
+                    f"第 {row_index + 1} 行第 {column_index + 1} 列不一致。"
+                )
     entry.sheet_id = sheet_id
     entry.link = target_sheet_link(entry.target, sheet_id)
     entry.status = "created"
@@ -241,17 +337,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-sheet-name", default="", help="统一覆盖目标 sheet 名；不填时使用文件名 suffix")
     parser.add_argument("--if-sheet-exists", choices=["fail", "skip"], default="fail")
     parser.add_argument("--confirmed", action="store_true", help="实际写入飞书；不加时只 dry-run")
+    parser.add_argument("--dry-run", action="store_true", help="只预览；默认行为，不解压 zip、不写摘要文件")
     parser.add_argument("--write-delay-seconds", type=float, default=2.5)
     parser.add_argument("--lark-cli", default="")
     parser.add_argument("--identity", choices=["user", "bot"], default="user")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--output-json", default="")
     parser.add_argument("--no-output-files", action="store_true")
+    parser.add_argument("--overwrite", action="store_true", help="与 --confirmed 一起允许覆盖已有摘要 JSON")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.confirmed and args.dry_run:
+        parser.error("--confirmed 和 --dry-run 不能同时使用")
+    if args.output_json:
+        output_json = Path(args.output_json).expanduser()
+        if output_json.exists() and not (args.confirmed and args.overwrite):
+            raise NongfuError(f"摘要已存在，拒绝覆盖: {output_json}；需要同时传 --overwrite --confirmed")
     config = load_config()
     nongfu = config.get("lx_nongfu", {}) if isinstance(config.get("lx_nongfu"), dict) else {}
     operator_doc = configured_value_map(config, ["lx_nongfu", "operator_doc"])
@@ -269,7 +374,12 @@ def main(argv: list[str] | None = None) -> int:
             "或在 config/fog_config.yaml 的 lx_nongfu.operator_doc.contact_person_root_folders 中按对接人配置。"
         )
 
-    entries = collect_entries([Path(item) for item in args.inputs], contact_person, args.include_lx)
+    entries = collect_entries(
+        [Path(item) for item in args.inputs],
+        contact_person,
+        args.include_lx,
+        confirmed=args.confirmed,
+    )
     if not entries:
         raise NongfuError("没有可发布的已拆分 Excel。")
 
@@ -362,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
         "operators_total": len(operators),
         "summary": summary,
     }
-    if not args.no_output_files:
+    if args.confirmed and not args.no_output_files:
         output_json = Path(args.output_json).expanduser() if args.output_json else output_paths(config, "split_outputs")
         if not output_json.is_absolute():
             output_json = PROJECT_ROOT / output_json

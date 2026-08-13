@@ -1,8 +1,6 @@
 ---
 name: lx-nongfu
 description: 农夫/运营主体协作文档编排 Skill。用于把线下 Excel 或飞书普通表格大文档按运营主体拆分到各主体的日常信息表，新建填写 sheet，生成运营主体通知，并在主体填写完成后按品牌+城市回填大文档。适用于大文档拆分、农夫协作、运营主体填表、日常信息收集、主体回填、品牌城市回写等场景。
-agent_created: true
-location: project
 ---
 
 # lx-nongfu — 农夫协作文档编排
@@ -141,11 +139,15 @@ python3 .workbuddy/skills/lx-nongfu/scripts/run_publish_split_outputs.py \
   --confirmed
 ```
 
+ZIP 输入必须在任何解压前完整校验：拒绝绝对路径、`..` 路径穿越、符号链接、规范化后重复输出名、过量成员、过量未压缩总大小、异常压缩比和非 `.xlsx` 文件。默认 dry-run 直接从 ZIP 内存读取，不解压，也不写本地 summary；`--dry-run` 与 `--confirmed` 互斥。confirmed 模式也必须先通过同一校验才可解压和发布。
+
 默认是 dry-run，只预览匹配结果、目标表和各运营主体通知内容；真正写入飞书必须显式加：
 
 ```bash
   --confirmed
 ```
+
+四个 R3 入口 `run_publish_split_outputs.py`、`run_split_publish.py`、`run_writeback.py`、`sync_ids_incremental.py` 在默认/未确认状态均不得调用飞书写方法、创建 summary/通知/快照目录。若显式输出路径已存在，必须同时传 `--overwrite --confirmed`，并在创建 client 前停止。confirmed 写入后的逐项读回任一失败时，不写成功摘要或快照；发布拆分结果时必须读回完整二维矩阵逐格比对，不得只抽查前几列。表头格式、合并单元格、行高和列宽必须从目标表读回逐项核对；接口缺少任一读回字段时按失败处理，不得标记 `format_refreshed`。`run_writeback.py` 每个变化必须在同一次目标行读回中同时核对品牌、城市和值，稳定键漂移即失败。
 
 关键参数：
 
@@ -156,6 +158,7 @@ python3 .workbuddy/skills/lx-nongfu/scripts/run_publish_split_outputs.py \
 | `--target-sheet-name` | 目标新建 sheet 名；不填时等于大文档 sheet 名 |
 | `--header-row` | 品牌/城市表头行；不填时在前 10 行自动识别 |
 | `--if-sheet-exists fail\|skip` | 目标表已有同名 sheet 时停止或跳过，默认停止 |
+| `--dry-run` | 显式只预览；默认行为，不解压 ZIP、不写本地 summary |
 | `--preserve-header-format / --no-preserve-header-format` | 是否复制表头区域样式、合并单元格、行高和列宽，默认复制 |
 | `--refresh-existing-header-format` | 配合 `--confirmed --if-sheet-exists skip` 使用；同名 sheet 已存在时只补刷表头格式，不重写数据 |
 | `--notification-template` | 面向各运营主体的通知模板；可用 `{operator}`、`{link}`、`{sheet_name}` 等占位 |
@@ -219,8 +222,9 @@ python .workbuddy/skills/lx-nongfu/scripts/sync_ids_incremental.py \
    - **从空变成有值** → 检出为「新增 ID」，预览后确认写入大文档
    - **已有值不变** → 跳过
    - **尚未填写** → 报告但不同步
-3. 写入大文档前会校验目标单元格是否已有值（避免覆盖手动填入的 ID）。
-4. 写入成功后更新快照。
+3. 内部字段统一使用 `banner`、`henglan`、`kaiping`、`sidebar` 四个 canonical key，并映射到大文档 E-H 列；主体表或大文档存在重复品牌+城市键时立即阻断，不采用 first-wins 或覆盖。
+4. 写入大文档前会校验目标单元格是否已有值（避免覆盖手动填入的 ID）。
+5. 每个变化写入后按目标行同时读回品牌、城市和值；接口返回失败、稳定键漂移或值不一致时停止，不输出“成功/写入完成”证据，也不更新快照。仅全部读回一致后才记录写入完成并更新快照。
 
 默认 dry-run（预览）。真正写入必须加 `--confirmed`。
 
@@ -248,3 +252,22 @@ python .workbuddy/skills/lx-nongfu/scripts/sync_ids_incremental.py \
 - 背审申诉、静默乘客这类固定台账同步放在 `lx-biaogetongbu`，用 `operator_workbook_sync.py --scenario beishen_shensu|jingmo_chengke` 执行。
 - 本地 Excel 和在线飞书普通表格的追加/按 key 更新由 `lx-biaogetongbu` 处理；写入开始后不自动换后端，失败必须报告真实原因。
 - 自动发短信、push、微信消息不属于本 Skill 第一版范围。
+
+## 执行契约
+
+### 输入
+
+- 已动态确认的大文档、目标运营主体、品牌+城市键、日常信息表和填写/回填字段。
+- 本地或飞书普通表格后端、dry-run/confirmed 模式及必要的目标链接。
+
+### 输出
+
+- 拆分结果、各主体写入计划、通知草稿、回填摘要和 JSON 审计文件。
+- 未匹配品牌城市、重复键、缺失链接和写入失败的明细。
+
+### 验收
+
+- 大文档源行与拆分/未匹配行可对账，主体归属来自公司库码表。
+- ZIP 在任何解压前通过路径、链接、重名、成员数、大小和压缩比校验；dry-run 不产生解压目录或 summary。
+- confirmed 数据写入后完整逐格读回；格式、合并、行高和列宽缺少可靠读回时 fail-closed。
+- 回填和增量 ID 同步按目标行同时复核品牌+城市稳定键和值；重复键、行漂移或值不一致时无成功摘要、无快照更新。

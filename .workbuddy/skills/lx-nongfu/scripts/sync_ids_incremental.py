@@ -46,12 +46,12 @@ from run_split_publish import (
 # ── column layout types ──────────────────────────────────────────────
 # Type A: D=对接同学, E=首页banner, F=首页横栏, G=首页开屏, H=首页侧边栏banner
 # Type B: D=首页banner, E=首页横栏, F=首页开屏, G=首页侧边栏banner
-ID_FIELDS = ["首页banner", "首页横栏", "首页开屏", "首页侧边栏banner"]
+ID_FIELDS = ["banner", "henglan", "kaiping", "sidebar"]
 MASTER_COLUMNS = {  # field -> master column letter
-    "首页banner": "E",
-    "首页横栏": "F",
-    "首页开屏": "G",
-    "首页侧边栏banner": "H",
+    "banner": "E",
+    "henglan": "F",
+    "kaiping": "G",
+    "sidebar": "H",
 }
 CONTACT_OPERATORS = {"LX", "哈啰文山", "小象快跑", "逸乘金华"}
 
@@ -74,9 +74,7 @@ class SyncChange:
 
 
 def snapshot_dir() -> Path:
-    path = PROJECT_ROOT / "workspace" / "12农夫协作" / "缓存"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return PROJECT_ROOT / "workspace" / "12农夫协作" / "缓存"
 
 
 def snapshot_file(contact_person: str, topic_sheet_name: str) -> Path:
@@ -191,7 +189,10 @@ def read_operator_ids(
         city = str(row[1]).strip() if len(row) > 1 else ""
         if not brand:
             continue
-        records[(brand, city)] = {
+        key = (brand, city)
+        if key in records:
+            raise NongfuError(f"{operator_name} 的主体表存在重复品牌城市键: {brand}/{city}")
+        records[key] = {
             "banner": str(row[cols[0]]).strip() if len(row) > cols[0] else "",
             "henglan": str(row[cols[1]]).strip() if len(row) > cols[1] else "",
             "kaiping": str(row[cols[2]]).strip() if len(row) > cols[2] else "",
@@ -226,8 +227,11 @@ def read_master_index(cli: LarkCli, master_token: str, master_sheet_id: str) -> 
             if not brand:
                 continue
             key = (brand, city)
-            if key not in index:  # first occurrence wins
-                index[key] = start + i
+            if key in index:
+                raise NongfuError(
+                    f"大文档存在重复品牌城市键: {brand}/{city}，行 {index[key]} 与 {start + i}"
+                )
+            index[key] = start + i
         if len(rows) < 50:
             break
     return index
@@ -429,6 +433,49 @@ def write_changes(
     return results
 
 
+def verify_changes(
+    cli: LarkCli, master_token: str, master_sheet_id: str, changes: list[SyncChange]
+) -> list[dict[str, Any]]:
+    """Read every target row back and verify brand, city, and intended value together."""
+    checks: list[dict[str, Any]] = []
+    for change in changes:
+        result = cli.sheets(
+            [
+                "+csv-get",
+                "--spreadsheet-token",
+                master_token,
+                "--sheet-id",
+                master_sheet_id,
+                "--range",
+                f"A{change.master_row}:{MASTER_COLUMNS[change.field]}{change.master_row}",
+            ]
+        )
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        rows = parse_annotated_csv(str(data.get("annotated_csv") or ""))
+        row = rows[0] if rows else []
+        target_column = ord(MASTER_COLUMNS[change.field]) - ord("A")
+        actual_brand = row[0].strip() if len(row) > 0 else ""
+        actual_city = row[1].strip() if len(row) > 1 else ""
+        actual = row[target_column].strip() if len(row) > target_column else ""
+        checks.append(
+            {
+                "cell": change.cell,
+                "expected_brand": change.brand,
+                "actual_brand": actual_brand,
+                "expected_city": change.city,
+                "actual_city": actual_city,
+                "expected": change.new_value,
+                "actual": actual,
+                "ok": (
+                    actual_brand == change.brand
+                    and actual_city == change.city
+                    and actual == change.new_value
+                ),
+            }
+        )
+    return checks
+
+
 # ── report ───────────────────────────────────────────────────────────
 
 
@@ -476,6 +523,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--output-json", default="")
     parser.add_argument("--no-output-files", action="store_true")
+    parser.add_argument("--overwrite", action="store_true", help="与 --confirmed 一起允许覆盖已有摘要 JSON")
     return parser
 
 
@@ -521,6 +569,10 @@ def default_output_path(topic: str, stamp: str) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.output_json:
+        output_json = Path(args.output_json).expanduser()
+        if output_json.exists() and not (args.confirmed and args.overwrite):
+            raise NongfuError(f"摘要已存在，拒绝覆盖: {output_json}；需要同时传 --overwrite --confirmed")
     config = load_config()
     operator_doc = configured_value_map(config, ["lx_nongfu", "operator_doc"])
 
@@ -579,6 +631,7 @@ def main(argv: list[str] | None = None) -> int:
     new_snapshot["topic_sheet_name"] = args.topic_sheet_name
     new_snapshot["master_url"] = args.master_url
     new_snapshot["master_sheet_id"] = master_sheet_id
+    operator_key_owners: dict[tuple[str, str], str] = {}
 
     timestamp = datetime.now().isoformat(timespec="seconds")
 
@@ -600,9 +653,21 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             current_ids, layout = read_operator_ids(cli, target, sheet_id, operator_name)
+        except NongfuError:
+            raise
         except Exception as exc:
             print(f"  [{operator_name}] 读取失败: {exc}", file=sys.stderr)
             continue
+
+        for brand_city in current_ids:
+            previous_operator = operator_key_owners.get(brand_city)
+            if previous_operator:
+                brand, city = brand_city
+                raise NongfuError(
+                    f"跨主体表重复品牌城市键: {brand}/{city}，"
+                    f"同时出现在 {previous_operator} 与 {operator_name}"
+                )
+            operator_key_owners[brand_city] = operator_name
 
         # Check if any IDs are filled
         filled_count = sum(
@@ -642,15 +707,24 @@ def main(argv: list[str] | None = None) -> int:
         results = write_changes(cli, master_token, master_sheet_id, all_changes)
         ok_count = sum(1 for r in results if r.get("ok"))
         fail_count = sum(1 for r in results if not r.get("ok"))
-        print(f"写入完成: {ok_count} 成功, {fail_count} 失败", file=sys.stderr)
-
         if fail_count:
             for r in results:
                 if not r.get("ok"):
                     print(f"  失败: {r['cell']} = {r['value']}", file=sys.stderr)
+            raise NongfuError("飞书写入返回失败，未更新本地快照。")
+
+        verification = verify_changes(cli, master_token, master_sheet_id, all_changes)
+        failed_verification = [item for item in verification if not item["ok"]]
+        if failed_verification:
+            raise NongfuError(
+                "写后验证失败，未更新本地快照: "
+                + json.dumps(failed_verification, ensure_ascii=False)
+            )
 
         # Save updated snapshot
+        snap_path.parent.mkdir(parents=True, exist_ok=True)
         save_snapshot(snap_path, new_snapshot)
+        print(f"写入完成: {ok_count} 成功, {fail_count} 失败", file=sys.stderr)
         print(f"快照已更新: {snap_path}", file=sys.stderr)
     elif not args.confirmed and all_changes:
         print(f"\n[DRY-RUN] 未实际写入。使用 --confirmed 执行写入。", file=sys.stderr)
@@ -683,7 +757,7 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if not args.no_output_files:
+    if args.confirmed and not args.no_output_files:
         json_path = Path(args.output_json).expanduser() if args.output_json else default_output_path(args.topic_sheet_name, stamp)
         if not json_path.is_absolute():
             json_path = PROJECT_ROOT / json_path

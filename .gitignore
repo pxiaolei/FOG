@@ -1,5 +1,5 @@
 # FOG Git 忽略规则
-# 目标：GitHub 只保存共享 Skill、安装检查工具、README/AGENT 和 workspace 00-09 固定目录结构。
+# 目标：GitHub 只保存共享 Skill、安装检查工具、README/AGENT 和 workspace 固定目录结构。
 
 # 本地真实配置、个人配置、码表和本机维护清单
 config/fog_config.yaml
@@ -9,6 +9,8 @@ config/personal_config.yaml.bak
 config/database.yaml
 config/rds.md
 config/码表/
+.env*
+!.env.example
 
 # 不分享的 Skill
 .workbuddy/skills/lx-hhgongbu/
@@ -48,10 +50,13 @@ docs/
 .fog-update-report.md
 .fog_backup/
 .template_exports/
+archived/
+outputs/
 zip/
 *.zip
 *.tmp
 *.tmp.*
+*.bak
 
 # workspace 只保留固定目录结构，不提交任何业务内容
 workspace/**
@@ -108,12 +113,18 @@ workspace/1*/
 !workspace/06后台操作/.gitkeep
 !workspace/07共补活动/
 !workspace/07共补活动/.gitkeep
-!workspace/07共补活动/待处理/
-!workspace/07共补活动/待处理/.gitkeep
-!workspace/07共补活动/已处理/
-!workspace/07共补活动/已处理/.gitkeep
-!workspace/07共补活动/处理日志/
-!workspace/07共补活动/处理日志/.gitkeep
+!workspace/07共补活动/共补待处理/
+!workspace/07共补活动/共补待处理/.gitkeep
+!workspace/07共补活动/共补已处理/
+!workspace/07共补活动/共补已处理/.gitkeep
+!workspace/07共补活动/共补原表存档/
+!workspace/07共补活动/共补原表存档/.gitkeep
+!workspace/07共补活动/共补未匹配报告/
+!workspace/07共补活动/共补未匹配报告/.gitkeep
+!workspace/07共补活动/共补同比表/
+!workspace/07共补活动/共补同比表/.gitkeep
+!workspace/07共补活动/共补处理日志/
+!workspace/07共补活动/共补处理日志/.gitkeep
 !workspace/08端内宣传图/
 !workspace/08端内宣传图/.gitkeep
 !workspace/08端内宣传图/参考图/
@@ -140,13 +151,17 @@ workspace/1*/
 !workspace/10表格同步/输出/.gitkeep
 !workspace/10表格同步/处理日志/
 !workspace/10表格同步/处理日志/.gitkeep
-!workspace/12农服协作/
-!workspace/12农服协作/.gitkeep
-!workspace/12农服协作/待处理/
-!workspace/12农服协作/待处理/.gitkeep
-!workspace/12农服协作/输出/
-!workspace/12农服协作/输出/.gitkeep
-!workspace/12农服协作/处理日志/
-!workspace/12农服协作/处理日志/.gitkeep
+!workspace/12农夫协作/
+!workspace/12农夫协作/.gitkeep
+!workspace/12农夫协作/待处理/
+!workspace/12农夫协作/待处理/.gitkeep
+!workspace/12农夫协作/已处理/
+!workspace/12农夫协作/已处理/.gitkeep
+!workspace/12农夫协作/输出/
+!workspace/12农夫协作/输出/.gitkeep
+!workspace/12农夫协作/处理日志/
+!workspace/12农夫协作/处理日志/.gitkeep
 !workspace/13月度返点计算/
 !workspace/13月度返点计算/.gitkeep
+!workspace/14安全台账相关/
+!workspace/14安全台账相关/.gitkeep

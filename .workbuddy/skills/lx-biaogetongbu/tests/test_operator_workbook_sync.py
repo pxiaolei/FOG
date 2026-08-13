@@ -8,15 +8,24 @@ SCRIPTS_DIR = SKILL_DIR / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from operator_workbook_sync import (  # noqa: E402
+    AppendRow,
     BuildContext,
+    CellUpdate,
+    ImageCopyTask,
     OperatorWorkbook,
     SheetRef,
     SheetTable,
+    SheetImage,
     TableRow,
     build_plan,
+    extract_embed_images,
     group_contiguous_columns,
     parse_annotated_csv,
     plain_cell_risk,
+    verify_append_keys,
+    verify_image_copies,
+    verify_updates,
+    write_image_copies,
 )
 
 
@@ -58,6 +67,31 @@ def make_context(profile, master, source):
         sources=[(workbook, source)],
         operators_requested=["方舟行武汉"],
     )
+
+
+class FakeCli:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def sheets(self, args, *, input_text=None, retries=1):
+        self.calls.append((args, input_text, retries))
+        return self.result
+
+
+class ReadbackCli:
+    def __init__(self, *, scalar_values=None, image_cells=None):
+        self.scalar_values = scalar_values or {}
+        self.image_cells = image_cells or {}
+
+    def sheets(self, args, *, input_text=None, retries=1):
+        cell = args[args.index("--range") + 1]
+        if "+csv-get" in args:
+            value = self.scalar_values.get(cell, "")
+            return {"data": {"annotated_csv": f"[row=1] {value}"}}
+        if "+cells-get" in args:
+            return {"data": {"ranges": [{"cells": [[self.image_cells.get(cell, {})]]}]}}
+        raise AssertionError(f"unexpected fake CLI call: {args}")
 
 
 BASE_PROFILE = {
@@ -151,6 +185,67 @@ class OperatorSyncPlanTests(unittest.TestCase):
         self.assertEqual(plan["result_updates"][0].cell, "D2")
         self.assertEqual(plan["result_updates"][0].new_value, "申诉通过")
 
+    def test_image_column_creates_copy_task_without_blocking_append(self):
+        profile = {
+            **BASE_PROFILE,
+            "image_columns": ["人证"],
+        }
+        master = make_table(
+            "master",
+            ["品牌", "司机ID", "城市", "人证"],
+            [],
+            last_row=1,
+        )
+        source = make_table(
+            "source",
+            ["品牌", "司机ID", "城市", "人证", "是否提交"],
+            [(2, {"品牌": "线下出行", "司机ID": "615", "城市": "威海", "人证": "", "是否提交": ""})],
+            last_row=2,
+        )
+        source.ref.row_count = 2
+        source.ref.column_count = 5
+        fake_cli = FakeCli(
+            {
+                "data": {
+                    "ranges": [
+                        {
+                            "row_indices": [2],
+                            "col_indices": ["D"],
+                            "cells": [
+                                [
+                                    {
+                                        "rich_text": [
+                                            {
+                                                "type": "embed-image",
+                                                "text": "id-card.png",
+                                                "image_name": "id-card.png",
+                                                "image_token": "img-token",
+                                                "image_width": 320,
+                                                "image_height": 240,
+                                            }
+                                        ]
+                                    }
+                                ]
+                            ],
+                        }
+                    ]
+                }
+            }
+        )
+
+        context = make_context(profile, master, source)
+        context.profile["_cli"] = fake_cli
+        plan = build_plan(context)
+
+        self.assertEqual(plan["blocking"]["image_risks"], [])
+        self.assertEqual(len(plan["append_rows"]), 1)
+        self.assertEqual(len(plan["image_copies"]), 1)
+        copy_task = plan["image_copies"][0]
+        self.assertEqual(copy_task.source_cell, "D2")
+        self.assertEqual(copy_task.target_cell, "D2")
+        self.assertEqual(copy_task.image.image_token, "img-token")
+        self.assertEqual(copy_task.image.image_name, "id-card.png")
+
 
 class CellRiskTests(unittest.TestCase):
     def test_plain_text_cell_is_not_risky(self):
@@ -161,6 +256,192 @@ class CellRiskTests(unittest.TestCase):
 
     def test_group_contiguous_columns(self):
         self.assertEqual(group_contiguous_columns({2: "B", 3: "C", 5: "E"}), [(2, ["B", "C"]), (5, ["E"])])
+
+    def test_extract_embed_images_keeps_token_and_dimensions(self):
+        images = extract_embed_images(
+            {
+                "rich_text": [
+                    {
+                        "type": "embed-image",
+                        "text": "proof.jpg",
+                        "image_token": "tok",
+                        "image_width": 120,
+                        "image_height": 90,
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0].image_token, "tok")
+        self.assertEqual(images[0].image_name, "proof.jpg")
+        self.assertEqual(images[0].image_width, 120)
+        self.assertEqual(images[0].image_height, 90)
+
+
+class ImageWriteTests(unittest.TestCase):
+    def test_write_image_copies_uses_cells_set_rich_text(self):
+        fake_cli = FakeCli({"ok": True})
+        copy_task = ImageCopyTask(
+            operator="方舟行武汉",
+            source_token="source-token",
+            source_sheet_id="source-sheet",
+            source_sheet_name="来源",
+            source_row_number=2,
+            source_column_number=4,
+            source_column_name="人证",
+            target_token="master-token",
+            target_sheet_id="master-sheet",
+            target_sheet_name="大表",
+            target_row_number=8,
+            target_column_number=4,
+            target_column_name="人证",
+            images=[
+                SheetImage(
+                    image_token="img-token",
+                    image_name="id-card.png",
+                    image_width=320,
+                    image_height=240,
+                )
+            ],
+        )
+
+        results = write_image_copies(fake_cli, [copy_task], 0)
+
+        args, payload, _ = fake_cli.calls[0]
+        self.assertEqual(results[0]["target_cell"], "D8")
+        self.assertIn("+cells-set", args)
+        self.assertIn("--cells", args)
+        self.assertIn("--range", args)
+        self.assertIn("D8", args)
+        self.assertIn('"type": "embed-image"', payload)
+        self.assertIn('"image_token": "img-token"', payload)
+
+
+class CompleteReadbackTests(unittest.TestCase):
+    def test_update_readback_includes_thirty_first_mismatch(self):
+        updates = [
+            CellUpdate(
+                operator="测试主体",
+                token="source-token",
+                sheet_id="source-sheet",
+                sheet_name="来源",
+                row_number=index + 2,
+                column_number=4,
+                column_name="状态",
+                old_value="",
+                new_value=f"状态-{index}",
+                reason="test",
+            )
+            for index in range(31)
+        ]
+        values = {update.cell: update.new_value for update in updates}
+        values[updates[30].cell] = "mismatch"
+
+        checks = verify_updates(ReadbackCli(scalar_values=values), updates)
+
+        self.assertEqual(len(checks), 31)
+        self.assertFalse(checks[30]["ok"])
+
+    def test_append_key_readback_includes_thirty_first_mismatch(self):
+        rows = [
+            AppendRow(
+                operator="测试主体",
+                source_row_number=index + 2,
+                target_row_number=index + 2,
+                key_text=f"key-{index}",
+                values_by_column={1: f"key-{index}"},
+            )
+            for index in range(31)
+        ]
+        values = {f"A{row.target_row_number}": row.key_text for row in rows}
+        values[f"A{rows[30].target_row_number}"] = "mismatch"
+        master = make_table("master", ["id"], [], last_row=1)
+
+        checks = verify_append_keys(ReadbackCli(scalar_values=values), master, rows, ["id"])
+
+        self.assertEqual(len(checks), 31)
+        self.assertFalse(checks[30]["ok"])
+
+    def test_append_readback_rejects_non_key_payload_mismatch(self):
+        row = AppendRow(
+            operator="测试主体",
+            source_row_number=2,
+            target_row_number=2,
+            key_text="key-1",
+            values_by_column={1: "key-1", 2: "expected-payload"},
+        )
+        master = make_table("master", ["id", "payload"], [], last_row=1)
+
+        checks = verify_append_keys(
+            ReadbackCli(scalar_values={"A2": "key-1", "B2": "wrong-payload"}),
+            master,
+            [row],
+            ["id"],
+        )
+
+        self.assertFalse(checks[0]["ok"])
+        self.assertEqual(checks[0]["cells"][1]["cell"], "B2")
+
+    def test_image_readback_includes_thirty_first_mismatch(self):
+        copies = [
+            ImageCopyTask(
+                operator="测试主体",
+                source_token="source-token",
+                source_sheet_id="source-sheet",
+                source_sheet_name="来源",
+                source_row_number=index + 2,
+                source_column_number=4,
+                source_column_name="人证",
+                target_token="master-token",
+                target_sheet_id="master-sheet",
+                target_sheet_name="大表",
+                target_row_number=index + 2,
+                target_column_number=4,
+                target_column_name="人证",
+                images=[SheetImage(image_token=f"image-{index}")],
+            )
+            for index in range(31)
+        ]
+        image_cells = {
+            copy.target_cell: {"rich_text": [{"type": "embed-image", "image_token": copy.image.image_token}]}
+            for copy in copies[:30]
+        }
+
+        checks = verify_image_copies(ReadbackCli(image_cells=image_cells), copies)
+
+        self.assertEqual(len(checks), 31)
+        self.assertFalse(checks[30]["ok"])
+
+    def test_image_readback_rejects_same_count_with_different_identity(self):
+        copy = ImageCopyTask(
+            operator="测试主体",
+            source_token="source-token",
+            source_sheet_id="source-sheet",
+            source_sheet_name="来源",
+            source_row_number=2,
+            source_column_number=4,
+            source_column_name="人证",
+            target_token="master-token",
+            target_sheet_id="master-sheet",
+            target_sheet_name="大表",
+            target_row_number=2,
+            target_column_number=4,
+            target_column_name="人证",
+            images=[SheetImage(image_token="expected-image")],
+        )
+
+        checks = verify_image_copies(
+            ReadbackCli(
+                image_cells={
+                    "D2": {"rich_text": [{"type": "embed-image", "image_token": "other-image"}]}
+                }
+            ),
+            [copy],
+        )
+
+        self.assertFalse(checks[0]["ok"])
+        self.assertEqual(checks[0]["expected_image_identities"], [("token", "expected-image")])
 
 
 if __name__ == "__main__":

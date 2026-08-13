@@ -66,6 +66,8 @@ class Change:
     cell: str
     old_value: str
     new_value: str
+    brand_column_number: int = 1
+    city_column_number: int = 2
 
 
 def parse_csv_list(value: str) -> list[str]:
@@ -240,6 +242,8 @@ def build_writeback_plan(
                         cell=cell,
                         old_value=old_value,
                         new_value=new_value,
+                        brand_column_number=master.brand_col + 1,
+                        city_column_number=master.city_col + 1,
                     )
                 )
 
@@ -293,6 +297,8 @@ def write_changes(cli: LarkCli, master_token: str, master_sheet_id: str, changes
 def verify_changes(cli: LarkCli, master_token: str, master_sheet_id: str, changes: list[Change]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     for change in changes:
+        start_column = min(change.brand_column_number, change.city_column_number, change.column_number)
+        end_column = max(change.brand_column_number, change.city_column_number, change.column_number)
         result = cli.sheets(
             [
                 "+csv-get",
@@ -301,14 +307,37 @@ def verify_changes(cli: LarkCli, master_token: str, master_sheet_id: str, change
                 "--sheet-id",
                 master_sheet_id,
                 "--range",
-                change.cell,
+                f"{col_to_a1(start_column)}{change.row_number}:{col_to_a1(end_column)}{change.row_number}",
             ]
         )
         data = result.get("data") if isinstance(result.get("data"), dict) else {}
         rows = parse_annotated_csv(str(data.get("annotated_csv") or ""))
-        actual = rows[0][0].strip() if rows and rows[0] else ""
-        ok = actual == change.new_value
-        checks.append({"cell": change.cell, "expected": change.new_value, "actual": actual, "ok": ok})
+        row = rows[0] if rows else []
+
+        def actual_at(column_number: int) -> str:
+            index = column_number - start_column
+            return row[index].strip() if index < len(row) else ""
+
+        actual_brand = actual_at(change.brand_column_number)
+        actual_city = actual_at(change.city_column_number)
+        actual = actual_at(change.column_number)
+        ok = (
+            actual_brand == change.brand
+            and actual_city == change.city
+            and actual == change.new_value
+        )
+        checks.append(
+            {
+                "cell": change.cell,
+                "expected_brand": change.brand,
+                "actual_brand": actual_brand,
+                "expected_city": change.city,
+                "actual_city": actual_city,
+                "expected": change.new_value,
+                "actual": actual,
+                "ok": ok,
+            }
+        )
     return checks
 
 
@@ -332,7 +361,7 @@ def default_output_path(sheet_name: str) -> Path:
 
 
 def write_output_file(result: dict[str, Any], args: argparse.Namespace, sheet_name: str) -> str:
-    if args.no_output_file:
+    if args.no_output_file or not args.confirmed:
         return ""
     path = Path(args.output_json).expanduser() if args.output_json else default_output_path(sheet_name)
     if not path.is_absolute():
@@ -364,11 +393,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--output-json", default="")
     parser.add_argument("--no-output-file", action="store_true")
+    parser.add_argument("--overwrite", action="store_true", help="与 --confirmed 一起允许覆盖已有摘要 JSON")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.output_json:
+        output_json = Path(args.output_json).expanduser()
+        if output_json.exists() and not (args.confirmed and args.overwrite):
+            raise NongfuError(f"摘要已存在，拒绝覆盖: {output_json}；需要同时传 --overwrite --confirmed")
     config = load_config()
     nongfu = configured_value_map(config, ["lx_nongfu"])
     operator_doc = configured_value_map(config, ["lx_nongfu", "operator_doc"])

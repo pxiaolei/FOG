@@ -2,8 +2,9 @@
 """Sync operator-owned Feishu workbooks back to recurring master sheets.
 
 Default behavior is dry-run. Use --confirmed to write Feishu ordinary Sheets.
-The command is intentionally value-first and refuses image-risk writes unless
-the caller explicitly accepts that risk.
+The command writes scalar values first, then copies supported cell-internal
+embed-image objects for configured image columns. Floating images and
+unrecognized rich objects remain blocking risks.
 """
 
 from __future__ import annotations
@@ -93,6 +94,45 @@ class AppendRow:
     target_row_number: int
     key_text: str
     values_by_column: dict[int, str]
+
+
+@dataclass
+class SheetImage:
+    image_token: str = ""
+    image_uri: str = ""
+    image_name: str = ""
+    image_width: int = 0
+    image_height: int = 0
+
+
+@dataclass
+class ImageCopyTask:
+    operator: str
+    source_token: str
+    source_sheet_id: str
+    source_sheet_name: str
+    source_row_number: int
+    source_column_number: int
+    source_column_name: str
+    target_token: str
+    target_sheet_id: str
+    target_sheet_name: str
+    target_row_number: int
+    target_column_number: int
+    target_column_name: str
+    images: list[SheetImage]
+
+    @property
+    def source_cell(self) -> str:
+        return f"{col_to_a1(self.source_column_number)}{self.source_row_number}"
+
+    @property
+    def target_cell(self) -> str:
+        return f"{col_to_a1(self.target_column_number)}{self.target_row_number}"
+
+    @property
+    def image(self) -> SheetImage:
+        return self.images[0]
 
 
 @dataclass
@@ -252,6 +292,27 @@ def col_to_a1(column: int) -> str:
         current, rem = divmod(current - 1, 26)
         result = chr(65 + rem) + result
     return result
+
+
+def a1_to_col(column: str) -> int:
+    result = 0
+    for char in column.strip().upper():
+        if not ("A" <= char <= "Z"):
+            raise OperatorSyncError(f"非法列名: {column}")
+        result = result * 26 + ord(char) - 64
+    return result
+
+
+def col_index_to_number(value: Any, fallback: int) -> int:
+    if isinstance(value, int):
+        return value if value >= 1 else value + 1
+    text = str(value or "").strip()
+    if text.isdigit():
+        number = int(text)
+        return number if number >= 1 else number + 1
+    if text:
+        return a1_to_col(text)
+    return fallback
 
 
 def a1_range(row_count: int, column_count: int) -> str:
@@ -648,27 +709,97 @@ def plain_cell_risk(cell: Any) -> bool:
     return isinstance(value, (dict, list))
 
 
-def inspect_image_cells(
-    cli: LarkCli,
-    table: SheetTable,
-    image_columns: list[str],
-    *,
-    row_numbers: set[int] | None = None,
-    max_examples: int = 20,
-) -> list[dict[str, Any]]:
-    available = [column for column in image_columns if column in table.headers]
-    if not available or not table.rows:
+def int_or_zero(value: Any) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def first_text(*values: Any) -> str:
+    for value in values:
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def rich_text_segments(cell: Any) -> list[dict[str, Any]]:
+    if not isinstance(cell, dict):
         return []
-    min_col = min(table.headers[column] for column in available)
-    max_col = max(table.headers[column] for column in available)
-    start_row = min(row.row_number for row in table.rows)
-    end_row = max(row.row_number for row in table.rows)
+    candidates = [
+        cell.get("rich_text"),
+        cell.get("richText"),
+        cell.get("segments"),
+    ]
+    value = cell.get("value")
+    if isinstance(value, dict):
+        candidates.extend([value.get("rich_text"), value.get("richText"), value.get("segments")])
+    elif isinstance(value, list):
+        candidates.append(value)
+    for candidate in candidates:
+        if isinstance(candidate, list):
+            return [item for item in candidate if isinstance(item, dict)]
+    return []
+
+
+def extract_embed_images(cell: Any) -> list[SheetImage]:
+    images: list[SheetImage] = []
+    for segment in rich_text_segments(cell):
+        segment_type = str(segment.get("type") or segment.get("segment_type") or "").strip()
+        if segment_type not in {"embed-image", "image"}:
+            continue
+        image = SheetImage(
+            image_token=first_text(segment.get("image_token"), segment.get("imageToken"), segment.get("file_token")),
+            image_uri=first_text(segment.get("image_uri"), segment.get("imageUri"), segment.get("uri")),
+            image_name=first_text(segment.get("image_name"), segment.get("imageName"), segment.get("name"), segment.get("text"), "image.png"),
+            image_width=int_or_zero(segment.get("image_width") or segment.get("imageWidth") or segment.get("width")),
+            image_height=int_or_zero(segment.get("image_height") or segment.get("imageHeight") or segment.get("height")),
+        )
+        if image.image_token or image.image_uri:
+            images.append(image)
+    return images
+
+
+def image_to_rich_text(image: SheetImage) -> dict[str, Any]:
+    segment: dict[str, Any] = {
+        "type": "embed-image",
+        "text": image.image_name or "image.png",
+        "image_name": image.image_name or "image.png",
+    }
+    if image.image_token:
+        segment["image_token"] = image.image_token
+    elif image.image_uri:
+        segment["image_uri"] = image.image_uri
+    if image.image_width > 0:
+        segment["image_width"] = image.image_width
+    if image.image_height > 0:
+        segment["image_height"] = image.image_height
+    return segment
+
+
+def collect_image_copy_tasks(
+    cli: LarkCli,
+    source: SheetTable,
+    master: SheetTable,
+    image_columns: list[str],
+    append_rows: list[AppendRow],
+    *,
+    max_examples: int = 20,
+) -> tuple[list[ImageCopyTask], list[dict[str, Any]]]:
+    available = [column for column in image_columns if column in source.headers and column in master.headers]
+    append_by_source_row = {row.source_row_number: row for row in append_rows}
+    if not available or not append_by_source_row:
+        return [], []
+    min_col = min(source.headers[column] for column in available)
+    max_col = max(source.headers[column] for column in available)
+    start_row = min(append_by_source_row)
+    end_row = max(append_by_source_row)
     result = cli.sheets(
         [
             "+cells-get",
-            *spreadsheet_locator(table.ref.url or table.ref.token),
+            *spreadsheet_locator(source.ref.url or source.ref.token),
             "--sheet-id",
-            table.ref.sheet_id,
+            source.ref.sheet_id,
             "--range",
             f"{col_to_a1(min_col)}{start_row}:{col_to_a1(max_col)}{end_row}",
             "--include",
@@ -683,22 +814,51 @@ def inspect_image_cells(
     row_indices = ranges[0].get("row_indices", [])
     col_indices = ranges[0].get("col_indices", [])
     if not isinstance(cells, list):
-        return []
+        return [], []
+    source_column_by_number = {source.headers[column]: column for column in available}
     risks: list[dict[str, Any]] = []
+    copies: list[ImageCopyTask] = []
     for row_offset, row_cells in enumerate(cells):
         if not isinstance(row_cells, list):
             continue
         row_number = row_indices[row_offset] if row_offset < len(row_indices) else start_row + row_offset
-        if row_numbers is not None and int(row_number) not in row_numbers:
+        row_number = int(row_number)
+        append_row = append_by_source_row.get(row_number)
+        if append_row is None:
             continue
         for col_offset, cell in enumerate(row_cells):
-            col_letter = col_indices[col_offset] if col_offset < len(col_indices) else col_to_a1(min_col + col_offset)
-            if not plain_cell_risk(cell):
+            fallback_col = min_col + col_offset
+            col_number = col_index_to_number(col_indices[col_offset], fallback_col) if col_offset < len(col_indices) else fallback_col
+            column_name = source_column_by_number.get(col_number)
+            if not column_name:
                 continue
-            risks.append({"row_number": row_number, "column": col_letter, "cell": f"{col_letter}{row_number}", "cell_keys": sorted(cell) if isinstance(cell, dict) else []})
-            if len(risks) >= max_examples:
-                return risks
-    return risks
+            images = extract_embed_images(cell)
+            if images:
+                copies.append(
+                    ImageCopyTask(
+                        operator=append_row.operator,
+                        source_token=source.ref.token,
+                        source_sheet_id=source.ref.sheet_id,
+                        source_sheet_name=source.ref.sheet_name,
+                        source_row_number=row_number,
+                        source_column_number=col_number,
+                        source_column_name=column_name,
+                        target_token=master.ref.token,
+                        target_sheet_id=master.ref.sheet_id,
+                        target_sheet_name=master.ref.sheet_name,
+                        target_row_number=append_row.target_row_number,
+                        target_column_number=master.headers[column_name],
+                        target_column_name=column_name,
+                        images=images,
+                    )
+                )
+                continue
+            if plain_cell_risk(cell):
+                col_letter = col_to_a1(col_number)
+                risks.append({"row_number": row_number, "column": col_letter, "cell": f"{col_letter}{row_number}", "cell_keys": sorted(cell) if isinstance(cell, dict) else []})
+                if len(risks) >= max_examples:
+                    return copies, risks
+    return copies, risks
 
 
 def common_append_columns(source: SheetTable, master: SheetTable, profile: dict[str, Any]) -> list[str]:
@@ -757,6 +917,7 @@ def build_plan(ctx: BuildContext) -> dict[str, Any]:
     status_updates: list[CellUpdate] = []
     status_header_updates: list[CellUpdate] = []
     result_updates: list[CellUpdate] = []
+    image_copies: list[ImageCopyTask] = []
     skipped: list[dict[str, Any]] = []
     already_in_master: list[dict[str, Any]] = []
     source_duplicates: list[dict[str, Any]] = []
@@ -890,18 +1051,24 @@ def build_plan(ctx: BuildContext) -> dict[str, Any]:
                         "message": "该普通表格存在浮动图片；当前脚本无法确认图片是否属于本次追加行，不会复制图片到大表。",
                     }
                 )
-            cell_risks = (
-                inspect_image_cells(ctx.profile["_cli"], source, image_columns, row_numbers=append_source_row_numbers)
-                if image_columns
-                else []
+            source_append_rows = [
+                row
+                for row in append_rows
+                if row.operator == workbook.operator and row.source_row_number in append_source_row_numbers
+            ]
+            new_image_copies, cell_risks = (
+                collect_image_copy_tasks(ctx.profile["_cli"], source, ctx.master, image_columns, source_append_rows)
+                if image_columns and ctx.profile.get("_cli") is not None
+                else ([], [])
             )
+            image_copies.extend(new_image_copies)
             if cell_risks:
                 ctx.image_risks.append(
                     {
                         "operator": workbook.operator,
-                        "type": "non_scalar_cells",
+                        "type": "uncopyable_image_cells",
                         "examples": cell_risks,
-                        "message": "本次追加行存在图片/富文本单元格；当前脚本不会复制这些对象。",
+                        "message": "本次追加行存在无法复制的图片/富文本单元格。",
                     }
                 )
 
@@ -962,6 +1129,7 @@ def build_plan(ctx: BuildContext) -> dict[str, Any]:
     }
     return {
         "append_rows": append_rows,
+        "image_copies": image_copies,
         "status_header_updates": status_header_updates,
         "status_updates": status_updates,
         "result_updates": result_updates,
@@ -1024,6 +1192,38 @@ def write_append_rows(cli: LarkCli, master: SheetTable, rows: list[AppendRow], d
                 }
             )
             time.sleep(delay_seconds)
+    return results
+
+
+def write_image_copies(cli: LarkCli, copies: list[ImageCopyTask], delay_seconds: float) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for copy_task in copies:
+        payload = [[{"rich_text": [image_to_rich_text(image) for image in copy_task.images]}]]
+        result = cli.sheets(
+            [
+                "+cells-set",
+                "--spreadsheet-token",
+                copy_task.target_token,
+                "--sheet-id",
+                copy_task.target_sheet_id,
+                "--range",
+                copy_task.target_cell,
+                "--cells",
+                "-",
+            ],
+            input_text=json.dumps(payload, ensure_ascii=False),
+        )
+        results.append(
+            {
+                "operator": copy_task.operator,
+                "source_cell": copy_task.source_cell,
+                "target_cell": copy_task.target_cell,
+                "column": copy_task.target_column_name,
+                "image_count": len(copy_task.images),
+                "result": result.get("ok", result.get("code", "")),
+            }
+        )
+        time.sleep(delay_seconds)
     return results
 
 
@@ -1093,9 +1293,9 @@ def read_single_cell(cli: LarkCli, token: str, sheet_id: str, cell: str) -> str:
     return normalize_value(rows[0][0]) if rows and rows[0] else ""
 
 
-def verify_updates(cli: LarkCli, updates: list[CellUpdate], limit: int = 30) -> list[dict[str, Any]]:
+def verify_updates(cli: LarkCli, updates: list[CellUpdate]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
-    for update in updates[:limit]:
+    for update in updates:
         actual = read_single_cell(cli, update.token, update.sheet_id, update.cell)
         checks.append(
             {
@@ -1110,21 +1310,93 @@ def verify_updates(cli: LarkCli, updates: list[CellUpdate], limit: int = 30) -> 
     return checks
 
 
-def verify_append_keys(cli: LarkCli, master: SheetTable, rows: list[AppendRow], key_columns: list[str], limit: int = 30) -> list[dict[str, Any]]:
+def verify_append_keys(cli: LarkCli, master: SheetTable, rows: list[AppendRow], key_columns: list[str]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     key_col_numbers = [master.headers[column] for column in key_columns if column in master.headers]
-    for row in rows[:limit]:
-        actual_key = tuple(
-            read_single_cell(cli, master.ref.token, master.ref.sheet_id, f"{col_to_a1(column)}{row.target_row_number}")
-            for column in key_col_numbers
-        )
+    for row in rows:
+        actual_by_column = {
+            column: read_single_cell(
+                cli,
+                master.ref.token,
+                master.ref.sheet_id,
+                f"{col_to_a1(column)}{row.target_row_number}",
+            )
+            for column in sorted(row.values_by_column)
+        }
+        actual_key = tuple(actual_by_column.get(column, "") for column in key_col_numbers)
+        cell_checks = [
+            {
+                "cell": f"{col_to_a1(column)}{row.target_row_number}",
+                "expected": normalize_value(expected),
+                "actual": actual_by_column[column],
+                "ok": actual_by_column[column] == normalize_value(expected),
+            }
+            for column, expected in sorted(row.values_by_column.items())
+        ]
+        key_ok = key_text(actual_key) == row.key_text
         checks.append(
             {
                 "operator": row.operator,
                 "target_row_number": row.target_row_number,
                 "expected_key": row.key_text,
                 "actual_key": key_text(actual_key),
-                "ok": key_text(actual_key) == row.key_text,
+                "cells": cell_checks,
+                "ok": key_ok and all(cell["ok"] for cell in cell_checks),
+            }
+        )
+    return checks
+
+
+def read_single_cell_images(cli: LarkCli, token: str, sheet_id: str, cell: str) -> list[SheetImage]:
+    result = cli.sheets(
+        [
+            "+cells-get",
+            "--spreadsheet-token",
+            token,
+            "--sheet-id",
+            sheet_id,
+            "--range",
+            cell,
+            "--include",
+            "value",
+        ]
+    )
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    ranges = data.get("ranges", []) if isinstance(data, dict) else []
+    if not ranges or not isinstance(ranges[0], dict):
+        return []
+    rows = ranges[0].get("cells", [])
+    if not rows or not isinstance(rows[0], list) or not rows[0]:
+        return []
+    return extract_embed_images(rows[0][0])
+
+
+def verify_image_copies(cli: LarkCli, copies: list[ImageCopyTask]) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    for copy_task in copies:
+        actual = read_single_cell_images(cli, copy_task.target_token, copy_task.target_sheet_id, copy_task.target_cell)
+        expected_identities = sorted(
+            ("token", image.image_token) if image.image_token else ("uri", image.image_uri)
+            for image in copy_task.images
+            if image.image_token or image.image_uri
+        )
+        actual_identities = sorted(
+            ("token", image.image_token) if image.image_token else ("uri", image.image_uri)
+            for image in actual
+            if image.image_token or image.image_uri
+        )
+        checks.append(
+            {
+                "operator": copy_task.operator,
+                "target_cell": copy_task.target_cell,
+                "expected_image_count": len(copy_task.images),
+                "actual_image_count": len(actual),
+                "expected_image_identities": expected_identities,
+                "actual_image_identities": actual_identities,
+                "ok": (
+                    len(expected_identities) == len(copy_task.images)
+                    and actual_identities == expected_identities
+                ),
             }
         )
     return checks
@@ -1153,6 +1425,16 @@ def append_row_to_dict(row: AppendRow, master: SheetTable) -> dict[str, Any]:
     }
 
 
+def image_copy_to_dict(copy_task: ImageCopyTask) -> dict[str, Any]:
+    return {
+        "operator": copy_task.operator,
+        "source_cell": copy_task.source_cell,
+        "target_cell": copy_task.target_cell,
+        "column": copy_task.target_column_name,
+        "image_count": len(copy_task.images),
+    }
+
+
 def default_output_path(scenario_id: str) -> Path:
     output_dir = PROJECT_ROOT / "workspace" / "10表格同步" / "处理日志"
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1160,12 +1442,26 @@ def default_output_path(scenario_id: str) -> Path:
     return output_dir / f"{stamp}_{safe}_operator_sync_summary.json"
 
 
-def write_output_file(result: dict[str, Any], args: argparse.Namespace, scenario_id: str) -> str:
+def resolve_output_path(args: argparse.Namespace, scenario_id: str) -> Path | None:
     if args.no_output_file:
-        return ""
+        return None
     path = Path(args.output_json).expanduser() if args.output_json else default_output_path(scenario_id)
     if not path.is_absolute():
         path = PROJECT_ROOT / path
+    return path
+
+
+def ensure_output_write_authorized(args: argparse.Namespace, scenario_id: str) -> None:
+    path = resolve_output_path(args, scenario_id)
+    if path is not None and path.exists() and not (args.confirmed and args.overwrite):
+        raise OperatorSyncError(f"输出已存在，拒绝覆盖: {path}；需要同时传 --overwrite --confirmed")
+
+
+def write_output_file(result: dict[str, Any], args: argparse.Namespace, scenario_id: str) -> str:
+    if not args.confirmed or args.no_output_file:
+        return ""
+    path = resolve_output_path(args, scenario_id)
+    assert path is not None
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return str(path)
@@ -1185,7 +1481,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--operator-folder-template", default="", help="默认 {operator}-运营主体")
     parser.add_argument("--target-table-template", default="", help="默认读取 profile，例如 {operator}-背审申诉")
     parser.add_argument("--header-row", type=int, default=1)
-    parser.add_argument("--allow-image-risk", action="store_true", help="允许在存在图片/富文本风险时继续写纯值；默认阻断")
+    parser.add_argument("--allow-image-risk", action="store_true", help="允许在存在浮动图片或不可复制富文本风险时继续写纯值；默认阻断")
     parser.add_argument("--confirmed", action="store_true", help="实际写入；不加时只 dry-run")
     parser.add_argument("--lark-cli", default="")
     parser.add_argument("--identity", choices=["user", "bot"], default="user")
@@ -1193,6 +1489,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--request-delay-seconds", type=float, default=1.2)
     parser.add_argument("--output-json", default="")
     parser.add_argument("--no-output-file", action="store_true")
+    parser.add_argument("--overwrite", action="store_true", help="与 --confirmed 一起允许覆盖已有 summary JSON")
     return parser
 
 
@@ -1227,6 +1524,8 @@ def load_sources(
 
 
 def run(args: argparse.Namespace) -> int:
+    scenario_hint = args.scenario or (Path(args.profile).stem if args.profile else "operator_sync")
+    ensure_output_write_authorized(args, scenario_hint)
     config = load_config()
     profile = load_profile(args.profile or args.scenario)
     scenario_id = str(profile.get("scenario_id") or args.scenario or Path(str(profile.get("_profile_path"))).stem)
@@ -1285,6 +1584,7 @@ def run(args: argparse.Namespace) -> int:
         raise OperatorSyncError("存在同步阻塞项，已停止写入: " + json.dumps(plan["blocking"], ensure_ascii=False)[:2000])
 
     append_rows: list[AppendRow] = plan["append_rows"]
+    image_copies: list[ImageCopyTask] = plan["image_copies"]
     status_header_updates: list[CellUpdate] = plan["status_header_updates"]
     status_updates: list[CellUpdate] = plan["status_updates"]
     result_updates: list[CellUpdate] = plan["result_updates"]
@@ -1292,10 +1592,12 @@ def run(args: argparse.Namespace) -> int:
     verification: dict[str, Any] = {}
     if args.confirmed:
         write_results["append"] = write_append_rows(cli, master, append_rows, args.request_delay_seconds) if append_rows else []
+        write_results["image_copies"] = write_image_copies(cli, image_copies, args.request_delay_seconds) if image_copies else []
         updates = status_header_updates + status_updates + result_updates
         write_results["updates"] = write_updates(cli, updates, args.request_delay_seconds) if updates else []
         key_columns = profile_list(profile, "key_columns")
         verification["append_keys"] = verify_append_keys(cli, master, append_rows, key_columns)
+        verification["image_copies"] = verify_image_copies(cli, image_copies)
         verification["updates"] = verify_updates(cli, updates)
         failed = [item for group in verification.values() for item in group if not item.get("ok")]
         if failed:
@@ -1320,6 +1622,8 @@ def run(args: argparse.Namespace) -> int:
         "skipped_sources": skipped_sources,
         "append_count": len(append_rows),
         "append_rows": [append_row_to_dict(row, master) for row in append_rows[:200]],
+        "image_copy_count": len(image_copies),
+        "image_copies": [image_copy_to_dict(copy_task) for copy_task in image_copies[:200]],
         "already_in_master_count": len(plan["already_in_master"]),
         "already_in_master": plan["already_in_master"][:200],
         "status_header_update_count": len(status_header_updates),

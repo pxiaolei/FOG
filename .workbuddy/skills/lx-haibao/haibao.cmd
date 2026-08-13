@@ -6,7 +6,7 @@ set "VENV_PY=%SCRIPT_DIR%.venv\Scripts\python.exe"
 
 if not exist "%VENV_PY%" (
   echo FAIL: lx-haibao venv Python was not found: "%VENV_PY%"
-  echo Run first: check_runtime.cmd --install
+  echo Run first: check_runtime.cmd --install --confirmed
   exit /b 1
 )
 

@@ -28,29 +28,9 @@ enabled_skills:
   lx_feishudocs: true
   lx_zhutichaibiao: true
   lx_haibao: true
-  lx_dapanribao: true
   lx_nongfu: true
   lx_biaogetongbu: true
   lx_tongzhi: true
-  lx_hhbbu: true
-  lx_zhoubao: true
-
-# ============================================================
-# database
-# 要配置什么：共享能力可选使用的 MySQL RDS 连接信息。
-# 说明：没有数据库权限可保持空值；内部写库配置优先放 personal_config.yaml。
-# ============================================================
-database:
-  driver: "mysql"
-  host: ""
-  port: 3306
-  database: ""
-  user: ""
-  password: ""
-  charset: "utf8mb4"
-  connect_timeout: 10
-  read_timeout: 300
-  write_timeout: 300
 
 # ============================================================
 # lx_shujuku
@@ -65,26 +45,6 @@ lx_shujuku:
   query:
     default_limit: 100
     max_limit: 1000
-
-# ============================================================
-# lx_hhbbu
-# 要配置什么：hhdata B补来源查询、审计输出目录，以及 hhdata 写回目标。
-# 说明：target 支持 excel_file 或 database_table。excel_file 写回唯一 hhdata Excel；database_table 写回数据库事实表。
-# 用法：target=excel_file 时必须填写唯一 hhdata Excel 文件路径；target=database_table 时必须配置 table。
-# ============================================================
-lx_hhbbu:
-  output_dir: "workspace/02数据导入/处理日志/lx-hhbbu"
-  local_hhdata:
-    target: "excel_file"
-    required_before_run: true
-    excel_file:
-      file: ""
-      sheet_name: ""
-      backup_dir: "workspace/02数据导入/处理日志/lx-hhbbu/backups"
-    database_table:
-      table: "hhdata__fact_daily_metrics"
-      city_dim_table: "mabiao__dim_cities"
-      brand_dim_table: "mabiao__dim_brands"
 
 # ============================================================
 # lx_zhutichaibiao
@@ -139,28 +99,6 @@ lx_haibao:
       aspect_ratio: "auto"
       upload_path: "images/lx-haibao"
       callback_url: ""
-
-# ============================================================
-# lx_dapanribao
-# 要配置什么：日报输出目录、异常阈值、飞书普通表格发布目标。
-# 说明：发布飞书普通表格时依赖 WorkBuddy 飞书连接器和 lx_feishudocs。
-# ============================================================
-lx_dapanribao:
-  default_person: ""
-  output_dir: "workspace/03数据报表/日报"
-  publish_backend: "lx-feishudocs"
-  # 留空时继承 lx_nongfu.operator_doc.contact_person_root_folders.{default_person}
-  # 如果日报需要单独放到另一套飞书根目录，再填写下面两个字段之一。
-  feishu_root_folder_url: ""
-  feishu_root_folder_token: ""
-  operator_folder_name_template: "{operator}-运营主体"
-  report_title_template: "{operator}-大盘数据日报"
-  operator_folder_overrides: {}
-  report_title_overrides: {}
-  title_suffix: "大盘数据日报"
-  anomaly_threshold_volume: 0.05
-  anomaly_threshold_rate: 0.02
-  deep_analysis_top_k: 5
 
 # ============================================================
 # lx_nongfu

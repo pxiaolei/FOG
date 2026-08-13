@@ -1,0 +1,6 @@
+interface:
+  display_name: "LX共享基础模块"
+  short_description: "为LX共享Skill提供配置、码表、Excel与缓存基础能力"
+  default_prompt: "使用 $lxx_share 作为上层LX业务Skill的代码依赖，并验证调用接口与返回结构。"
+policy:
+  allow_implicit_invocation: false

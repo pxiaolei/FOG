@@ -582,6 +582,8 @@ def read_header_format(cli: LarkCli, source: SourceSheet, header_rows: int, colu
     )
     data = cells_result.get("data") if isinstance(cells_result.get("data"), dict) else {}
     ranges = data.get("ranges", []) if isinstance(data, dict) else []
+    if not ranges or not isinstance(ranges[0], dict) or "cells" not in ranges[0]:
+        raise NongfuError("源表格式读取不可用：cells-get 未返回单元格。")
     cells = ranges[0].get("cells", []) if ranges and isinstance(ranges[0], dict) else []
     layout = cli.sheets(
         [
@@ -597,6 +599,9 @@ def read_header_format(cli: LarkCli, source: SourceSheet, header_rows: int, colu
         ]
     )
     layout_data = layout.get("data") if isinstance(layout.get("data"), dict) else {}
+    required_layout = {"merged_cells", "row_heights", "column_widths"}
+    if not required_layout.issubset(layout_data):
+        raise NongfuError("源表格式读取不可用：sheet-info 缺少布局字段。")
     return rectangular_cells(cells if isinstance(cells, list) else [], header_rows, column_count), layout_data
 
 
@@ -695,6 +700,106 @@ def apply_header_format(
         time.sleep(delay_seconds)
 
 
+def read_target_header_format(
+    cli: LarkCli,
+    target: TargetWorkbook,
+    sheet_id: str,
+    header_rows: int,
+    column_count: int,
+) -> tuple[list[list[dict[str, Any]]], dict[str, Any]]:
+    range_text = a1_range(header_rows, column_count)
+    cells_result = cli.sheets(
+        [
+            "+cells-get",
+            "--spreadsheet-token",
+            target.spreadsheet_token,
+            "--sheet-id",
+            sheet_id,
+            "--range",
+            range_text,
+            "--include",
+            "value,style",
+        ]
+    )
+    data = cells_result.get("data") if isinstance(cells_result.get("data"), dict) else {}
+    ranges = data.get("ranges", []) if isinstance(data, dict) else []
+    if not ranges or not isinstance(ranges[0], dict) or "cells" not in ranges[0]:
+        raise NongfuError(f"{target.operator} 表头格式读回不可用：cells-get 未返回单元格。")
+    cells = ranges[0].get("cells", []) if ranges and isinstance(ranges[0], dict) else []
+    layout_result = cli.sheets(
+        [
+            "+sheet-info",
+            "--spreadsheet-token",
+            target.spreadsheet_token,
+            "--sheet-id",
+            sheet_id,
+            "--range",
+            range_text,
+            "--include",
+            "merges,row_heights,col_widths",
+        ]
+    )
+    layout = layout_result.get("data") if isinstance(layout_result.get("data"), dict) else {}
+    required_layout = {"merged_cells", "row_heights", "column_widths"}
+    if not required_layout.issubset(layout):
+        raise NongfuError(f"{target.operator} 表头格式读回不可用：sheet-info 缺少布局字段。")
+    return rectangular_cells(cells if isinstance(cells, list) else [], header_rows, column_count), layout
+
+
+def require_target_header_format_readback(
+    cli: LarkCli,
+    target: TargetWorkbook,
+    sheet_id: str,
+    header_rows: int,
+    column_count: int,
+) -> None:
+    read_target_header_format(cli, target, sheet_id, header_rows, column_count)
+
+
+def canonical_layout_items(layout: dict[str, Any], key: str, fields: tuple[str, ...]) -> list[tuple[str, ...]]:
+    items = layout.get(key, []) if isinstance(layout, dict) else []
+
+    def canonical_field(field: str, value: Any) -> str:
+        text = str(value)
+        if field == "type" and text == "custom":
+            return "pixel"
+        return text
+
+    return sorted(
+        tuple(canonical_field(field, item.get(field, "")) for field in fields)
+        for item in items
+        if isinstance(item, dict)
+    )
+
+
+def verify_header_format(
+    cli: LarkCli,
+    target: TargetWorkbook,
+    sheet_id: str,
+    expected_cells: list[list[dict[str, Any]]],
+    expected_layout: dict[str, Any],
+    header_rows: int,
+    column_count: int,
+) -> None:
+    actual_cells, actual_layout = read_target_header_format(
+        cli, target, sheet_id, header_rows, column_count
+    )
+    expected_rect = rectangular_cells(expected_cells, header_rows, column_count)
+    if actual_cells != expected_rect:
+        raise NongfuError(f"{target.operator} 表头格式读回失败：单元格值或样式不一致。")
+
+    layout_fields = {
+        "merged_cells": ("range",),
+        "row_heights": ("rows", "type", "height"),
+        "column_widths": ("cols", "type", "width"),
+    }
+    for key, fields in layout_fields.items():
+        expected_items = canonical_layout_items(expected_layout, key, fields)
+        actual_items = canonical_layout_items(actual_layout, key, fields)
+        if any(item not in actual_items for item in expected_items):
+            raise NongfuError(f"{target.operator} 表头格式读回失败：{key} 不一致。")
+
+
 def refresh_existing_header_format(
     cli: LarkCli,
     publish: OperatorPublish,
@@ -706,6 +811,9 @@ def refresh_existing_header_format(
 ) -> None:
     if publish.target is None or not publish.sheet_id:
         raise NongfuError(f"{publish.operator} 缺少既有 sheet，无法补刷表头格式。")
+    require_target_header_format_readback(
+        cli, publish.target, publish.sheet_id, header_row_count, column_count
+    )
     apply_header_format(
         cli,
         publish.target,
@@ -715,6 +823,15 @@ def refresh_existing_header_format(
         header_row_count,
         column_count,
         delay_seconds,
+    )
+    verify_header_format(
+        cli,
+        publish.target,
+        publish.sheet_id,
+        header_cells,
+        header_layout,
+        header_row_count,
+        column_count,
     )
     publish.status = "format_refreshed"
 
@@ -797,6 +914,9 @@ def write_and_verify(
     )
     time.sleep(delay_seconds)
     if preserve_header_format and header_cells is not None and header_layout is not None:
+        require_target_header_format_readback(
+            cli, publish.target, sheet_id, header_row_count, column_count
+        )
         apply_header_format(
             cli,
             publish.target,
@@ -806,6 +926,15 @@ def write_and_verify(
             header_row_count,
             column_count,
             delay_seconds,
+        )
+        verify_header_format(
+            cli,
+            publish.target,
+            sheet_id,
+            header_cells,
+            header_layout,
+            header_row_count,
+            column_count,
         )
     verify = cli.sheets(
         [
@@ -827,8 +956,12 @@ def write_and_verify(
     # The format copy may restore A1 as rich text; csv-get should still expose the same text.
     for row_index, expected_row in enumerate(expected):
         actual_row = actual_padded[row_index]
-        if actual_row[: min(3, column_count)] != expected_row[: min(3, column_count)]:
-            raise NongfuError(f"{publish.operator} 写后验证失败：第 {row_index + 1} 行品牌/城市/辅助列不一致。")
+        for column_index, expected_value in enumerate(expected_row):
+            if actual_row[column_index] != expected_value:
+                raise NongfuError(
+                    f"{publish.operator} 写后验证失败："
+                    f"第 {row_index + 1} 行第 {column_index + 1} 列不一致。"
+                )
     publish.sheet_id = sheet_id
     publish.link = target_sheet_link(publish.target, sheet_id)
     publish.status = "created"
@@ -901,7 +1034,7 @@ def write_outputs(
     config: dict[str, Any],
     source_sheet_name: str,
 ) -> dict[str, str]:
-    if args.no_output_files:
+    if args.no_output_files or not args.confirmed:
         return {}
     default_json, default_md = default_output_paths(config, source_sheet_name)
     json_path = Path(args.output_json).expanduser() if args.output_json else default_json
@@ -953,11 +1086,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-json", default="")
     parser.add_argument("--output-markdown", default="")
     parser.add_argument("--no-output-files", action="store_true")
+    parser.add_argument("--overwrite", action="store_true", help="与 --confirmed 一起允许覆盖已有 JSON/通知输出")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    for raw_path in (args.output_json, args.output_markdown):
+        if raw_path and Path(raw_path).expanduser().exists() and not (args.confirmed and args.overwrite):
+            raise NongfuError(f"输出已存在，拒绝覆盖: {Path(raw_path).expanduser()}；需要同时传 --overwrite --confirmed")
     config = load_config()
     nongfu = config.get("lx_nongfu", {}) if isinstance(config.get("lx_nongfu"), dict) else {}
     operator_doc = nongfu.get("operator_doc", {}) if isinstance(nongfu.get("operator_doc"), dict) else {}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "运营主体拆表"
+  short_description: "按运营主体、城市或品牌拆分表格并生成发布与通知计划"
+  default_prompt: "使用 $lx-zhutichaibiao 按确认维度拆分实际表格，并对账行数、未匹配项和可选发布结果。"
+policy:
+  allow_implicit_invocation: false

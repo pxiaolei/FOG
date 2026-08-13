@@ -15,17 +15,22 @@ LXX 出行业务运营自动化 Skill 工作区。
 - 真实配置里填写个人账号、目录、图片 API Key、飞书普通表格偏好等
 - `config/fog_config.yaml` 不进入 GitHub
 
-给 AI 的更新提示词：
+同事更新时直接对 WorkBuddy 说：
 
 ```text
-请在我的 FOG 项目文件夹里更新到 GitHub 仓库 pxiaolei/FOG 的 main 分支。
-我的电脑是 Windows，我使用的是国内 WorkBuddy；不要假设有 Codex、OpenAI image_gen、Mac 绝对路径或维护者本机私有脚本。
-更新前先检查本地有没有未提交或未同步的改动；如果有，先告诉我具体文件，不要直接覆盖。
-更新时只同步共享代码、共享 Skill 和配置模板，不要覆盖 config/fog_config.yaml、workspace/、.workbuddy/skills/*/assets/config.yaml、缓存和业务输出。
-如果 config/fog_config.yaml 不存在，请参考 config/fog_config.yaml.example 创建，并提醒我填写个人账号、token、目录和 API Key。
-如果配置模板新增了字段，请把新增字段补到 config/fog_config.yaml，保留我原来的真实配置值。
-更新完成后请做一次初始化和配置检查，并告诉我哪些项已通过、哪些项还需要我补配置。
+使用 lx-update 检查 FOG 更新；如果可以快进，先告诉我远端 commit 和变更文件，等我确认后再更新。
 ```
+
+也可以手工运行：
+
+```bash
+python .workbuddy/skills/lx-update/scripts/update_fog.py check
+python .workbuddy/skills/lx-update/scripts/update_fog.py apply --confirmed <check 输出的 remote_commit>
+```
+
+`lx-update` 不会自动 stash、reset、合并或覆盖本地配置。检测到未提交改动、分支分叉、未授权远端删除、受保护路径或本地文件冲突时会停止；固定退役清单内的 Skill 删除也会先逐文件展示，只有确认完整远端 commit 后才随 fast-forward 生效。更新后真实配置仍需按提示另行检查，不能把配置改写混进代码更新。
+
+第一次 bootstrap：如果同事当前版本还没有 `lx-update`，先让 WorkBuddy 只读检查 `git status` 和 `origin/main` 差异；工作区不干净就停止，干净且仅可 fast-forward 时，再由同事确认目标 commit 后执行一次 `git fetch` + `git merge --ff-only`。首次拉到 `lx-update` 后，后续不要再使用临时提示词。
 
 ## 2. 文件夹结构
 
@@ -42,9 +47,9 @@ FOG/
     ├── 02数据导入/             # 数据导入加工
     ├── 03数据报表/             # 日报、周报、月报、其他报表
     ├── 04数据分析/             # 数据探索和异动分析
-    ├── 05策略活动/             # 活动策划、竞品策略、后台导入表
+    ├── 05策略活动/             # 历史业务工作区占位，不代表对应 Skill 仍共享
     ├── 06后台操作/             # SaaS 后台操作材料
-    ├── 07共补活动/             # 共补策略处理
+    ├── 07共补活动/             # 历史业务工作区占位，不代表对应 Skill 仍共享
     ├── 08端内宣传图/           # 端内宣传物料
     ├── 09端外海报图/           # 端外海报图、活动 TXT、临时图和元数据
     ├── 10表格同步/             # A 表到 B 表同步
@@ -52,7 +57,7 @@ FOG/
     │   ├── 待处理/
     │   ├── 输出/
     │   └── 处理日志/
-    └── 13月度返点计算/         # 月度返点规则、入库源数据和输出
+    └── 13月度返点计算/         # 历史业务工作区占位，不代表对应 Skill 仍共享
 ```
 
 ## 3. Skill 说明和使用
@@ -65,18 +70,14 @@ FOG/
 | `lx-biaogetongbu` | 本地 Excel 或飞书普通表格的 A 表到 B 表同步，支持按 key 回填 | “把 A 表同步到 B 表”“按品牌城市回填大文档” |
 | `lx-tongzhi` | 按商家、司机、线下渠道生成短信、push、微信群通知和操作说明，并做禁词检查 | “生成商家通知”“写司机 push”“检查禁词” |
 | `lx-nongfu` | 农夫协作文档编排：大文档拆分到运营主体、通知填写、按品牌+城市回填大文档 | “跑农夫协作流程”“把大文档拆给各主体填写” |
-| `lx-dapanribao` | 按对接人生成运营主体日报和飞书普通表格发布计划 | “生成大盘日报”“做今日日报” |
-| `lx-hhbbu` | 从公司库按日期、城市、品牌取得 B补和售卡商家收入，并写回配置的 hhdata 目标（单个 Excel 文件或数据库表）三列 | “修复 hhdata B补”“写回 B补数据”“查售卡商家收入” |
-| `lx-zhoubao` | 生成周报所需的日/周聚合和报告 | “生成周报”“刷新周报聚合” |
-| `lx-celuehuodong` | 更新策略活动表、生成免佣卡、更新城市日历和后台导入文件 | “更新策略活动”“生成免佣卡”“更新共补日历” |
 | `lx-haibao` | 根据城市活动 TXT 生成司机活动海报，支持 dry-run 和确认后出图 | “根据这个 TXT 生成海报”“检查海报配置” |
-| `lx-yuedufandian` | 先把月度返点源 Excel 入库，再按规则读库计算运营主体品牌返点并生成 Excel | “算月度返点”“生成返佣表” |
 | `lx-init` | 旧初始化兼容入口；新流程优先使用 `tools/fog.py` | “初始化 FOG”“检查配置” |
+| `lx-update` | 检查并安全快进同事本地 FOG，共享 Skill 与代码随 GitHub 更新 | “检查 FOG 更新”“更新共享 Skill” |
 | `lxx_share` | 共享 Python 基础模块，给其他 Skill 复用，不直接触发 | 不直接使用 |
 
 使用时优先用自然语言告诉 WorkBuddy 目标、文件路径、是否要 dry-run。涉及写入飞书普通表格、生成图片、移动文件、回填大文档的动作，默认先预览，确认后再执行。
 
-说明：维护者从私人 `p-fog` 同步到本仓时，只会覆盖白名单内容。本仓已有的历史 Skill 如果未纳入当前白名单，可能不会在每次同步中更新；遇到文档和实际目录不一致时，以当前仓库真实文件和 `AGENT.md` 的边界说明为准。
+当前共享仓只保留上表 10 个 Skill。`lx-zhoubao`、`lx-hhbbu`、`lx-dapanribao`、`lx-celuehuodong`、`lx-yuedufandian` 属于维护者私有能力，不在 FOG 提供，也不会从私人源仓再次同步回来。
 
 ## 4. 设计原则
 

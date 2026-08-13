@@ -127,6 +127,7 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--install", action="store_true", help="Create .venv if missing and install requirements into it.")
+    parser.add_argument("--confirmed", action="store_true", help="Confirm the R4 local environment change requested by --install.")
     parser.add_argument("--venv", default=str(DEFAULT_VENV_DIR), help="Skill-local venv directory. Default: lx-haibao/.venv")
     parser.add_argument("--python", default=sys.executable, help="Bootstrap Python used only to create the venv when --install is set.")
     parser.add_argument("--upgrade-pip", action="store_true", help="Upgrade pip inside the venv before installing requirements.")
@@ -135,6 +136,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.install and not args.confirmed:
+        print("FAIL: --install 会创建本地 venv 并运行 pip；请追加 --confirmed。")
+        return 2
+
     venv_dir = Path(args.venv).expanduser().resolve()
     bootstrap_python = Path(args.python).expanduser().resolve()
     runtime_python = venv_python(venv_dir)
@@ -154,7 +159,7 @@ def main() -> int:
         elif not runtime_python.is_file():
             print(f"FAIL: 未找到 venv Python: {runtime_python}")
             print("请先运行：")
-            print(f"  {check_runtime_launcher()} --install")
+            print(f"  {check_runtime_launcher()} --install --confirmed")
             return 1
 
         if not runtime_python.is_file():

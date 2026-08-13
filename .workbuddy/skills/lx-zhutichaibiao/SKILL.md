@@ -1,7 +1,6 @@
 ---
 name: lx-zhutichaibiao
 description: 按运营主体/城市/品牌拆表工具。将待拆表格按公司库 operator_brand 码表中的运营主体、城市、品牌和对接人拆分成多个独立文件，打包输出。支持拆分后交给 lx-nongfu / lx-feishudocs 发布到飞书普通表格，并生成面向各运营主体的通知消息。触发词：拆主体表、主体拆表、lx-zhutichaibiao、zhutichaibiao、按运营主体拆、按城市拆、按品牌拆、纯品牌拆、生成通知、发消息给各主体。
-agent_created: true
 ---
 
 # 按运营主体/城市/品牌拆表工具
@@ -56,7 +55,7 @@ agent_created: true
 检查 `config/fog_config.yaml` 是否存在，并确认 `lx_zhutichaibiao` 段已配置。如需交互式补充，可运行：
 
 ```bash
-python .workbuddy/skills/lx-zhutichaibiao/scripts/split_by_zhuti.py --config
+python .workbuddy/skills/lx-zhutichaibiao/scripts/split_by_zhuti.py --config --confirmed
 ```
 
 配置项包括：项目根目录、默认对接人、工作目录。每个用户维护自己的 `config/fog_config.yaml`，不提交到版本管理。码表来源固定为 `lx_shujuku.operator_brand`。
@@ -80,8 +79,10 @@ python .workbuddy/skills/lx-zhutichaibiao/scripts/split_by_zhuti.py --config
 运行脚本（在 workspace 根目录下执行，无需 cd 到绝对路径）：
 
 ```bash
-python .workbuddy/skills/lx-zhutichaibiao/scripts/split_by_zhuti.py -m <mode> -p <person> [-k <keep_sheets>]
+python .workbuddy/skills/lx-zhutichaibiao/scripts/split_by_zhuti.py -m <mode> -p <person> [-k <keep_sheets>] --dry-run
 ```
+
+默认行为等同 `--dry-run`：只列出待拆文件，不创建目录、不连接公司库、不生成 Excel/ZIP/日志、不移动原表。确认输入目录、输出目录和源文件后，必须把 `--dry-run` 改为 `--confirmed` 才会连接公司库并应用拆分。两者互斥；`--config` 也只有配合 `--confirmed` 才会写配置。
 
 参数说明：
 - `-m`: 1=运营主体, 2=城市, 3=品牌→运营主体, 4=纯品牌
@@ -230,6 +231,7 @@ lx-zhutichaibiao/
 
 - 列检测和对接人筛选函数（`find_column`/`detect_columns`/`filter_by_person`）从 `lxx_share.excel_utils` 导入，不再内联
 - 码表映射从 `lx_shujuku.load_mabiao_mapping()` 加载，不再读取本地 Excel 码表
+- 默认 preview；只有 `--confirmed` 才允许创建目录、生成/压缩文件、移动原表或连接公司库
 - 不使用 `echo` 管道跳过交互确认
 - 不在未确认时移动原表或写入飞书普通表格
 - `config/fog_config.yaml` 包含用户个人路径和账号，**不应提交到 git**
@@ -250,3 +252,20 @@ lx-zhutichaibiao/
 - 修改飞书目标缓存结构或路径时，需同步检查 `lx-feishudocs`、`lx-nongfu` 和本文件
 - 个人版 `entity_cache.json` 只作为本机兼容缓存，不进入 GitHub 分享模板
 - `lx-dapanribao` 的表格 `file_id` 独立存储在 `lx-dapanribao/assets/dailyreport_cache.json`，不与 `entity_cache.json` 混用
+
+## 执行契约
+
+### 输入
+
+- 动态枚举到的待拆表、拆分维度、目标 sheet/表头和 confirmed 后读取的公司库 `operator_brand` 码表。
+- 可选飞书发布与通知阶段，以及各阶段的确认状态。
+
+### 输出
+
+- 分主体/城市/品牌文件、压缩包、未匹配报告和拆分统计。
+- 可选飞书发布读回与通知草稿；不自动发送通知。
+
+### 验收
+
+- preview 下目标目录和源文件保持不变；confirmed 后源数据行数等于各拆分文件有效行与未匹配行之和，格式和表头可读回。
+- 映射来自公司库码表；发布后读回目标，通知中的主体、链接和事实与拆分结果一致。

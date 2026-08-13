@@ -1,6 +1,6 @@
 # dataReporting 数据库表结构目录
 
-> 生成时间：2026-07-14T10:57:00.986155+08:00  |  数据库：dataReporting  |  共 20 张表
+> 生成时间：2026-07-21T22:32:02.728114+08:00  |  数据库：dataReporting  |  共 20 张表
 
 ---
 
@@ -347,7 +347,7 @@
 
 ## honghu_detail_data
 
-**宏鹄详情数据汇总表（汇总数据）**  |  45 个字段
+**宏鹄详情数据汇总表（汇总数据）**  |  44 个字段
 
 | # | 字段名 | 类型 | 键 | 可为空 | 注释 |
 |---|--------|------|-----|--------|------|
@@ -372,30 +372,29 @@
 | 19 | `first_completion_driver_count` | `int(11)` |  | 是 | 首次完单司机数 |
 | 20 | `total_subsidy_amount` | `decimal(20,4)` |  | 是 | 总b补金额（元）= 营销表总奖励金额 + 卡券表总补贴金额 |
 | 21 | `merchant_subsidy_amount` | `decimal(20,4)` |  | 是 | 商家b补金额（元）= 营销表商家补贴 + 卡券表商家补贴 |
-| 22 | `tr_value` | `decimal(20,6)` |  | 是 | TR值（品牌抽佣用：GMV * tr_value） |
-| 23 | `tr_total` | `decimal(20,6)` |  | 是 | 总TR值（总抽佣用：GMV * tr_total） |
-| 24 | `total_commission` | `decimal(20,4)` |  | 是 | 总抽佣 = GMV * tr_total |
-| 25 | `brand_commission` | `decimal(20,4)` |  | 是 | 品牌抽佣 = GMV * tr_value |
-| 26 | `merchant_coupon_sales_revenue` | `decimal(20,4)` |  | 是 | 商家券后售卡收入（元） |
-| 27 | `response_rate` | `decimal(10,6)` |  | 是 | 应答率 = 应答量 / 乘客发单量 |
-| 28 | `pk_success_rate` | `decimal(10,6)` |  | 是 | PK成功率（直接取订单表均值） |
-| 29 | `transaction_rate` | `decimal(10,6)` |  | 是 | 成交率 = 完单量 / 乘客发单量 |
-| 30 | `average_order_price` | `decimal(20,4)` |  | 是 | 单均价 = GMV / 完单量 |
-| 31 | `completion_rate_after_response` | `decimal(10,6)` |  | 是 | 应答后完单率 = 完单量 / 应答量 |
-| 32 | `per_capita_online_duration_hour` | `decimal(20,4)` |  | 是 | 人均在线时长（小时） = 在线时长 / 在线司机数 |
-| 33 | `service_duration_ratio` | `decimal(10,6)` |  | 是 | 服务时长占比 = 服务时长 / 在线时长 |
-| 34 | `per_capita_completion_count` | `decimal(10,4)` |  | 是 | 人均完单量 = 完单量 / 完单司机数 |
-| 35 | `completion_per_hour` | `decimal(10,4)` |  | 是 | 每小时完单量（直接取运力表均值） |
-| 36 | `forced_co_subsidy_coupon_gmv` | `decimal(20,4)` |  | 是 | 强制共补卡券活动的总订单GMV（补贴类型="强制共补"） |
-| 37 | `forced_co_subsidy_zero_tr_activity_gmv` | `decimal(20,4)` |  | 是 | 强制共补0TR营销活动的总订单GMV（奖励模板="0TR"且补贴类型="强制共补"） |
-| 38 | `co_subsidy_gmv` | `decimal(20,4)` |  | 是 | 共补GMV = 强制共补卡券GMV + 强制共补0TR营销GMV |
-| 39 | `total_tr` | `decimal(20,6)` |  | 是 | 总TR = tr_total（直接取值） |
-| 40 | `merchant_tr` | `decimal(20,6)` |  | 是 | 商家TR = tr_value（直接取值） |
-| 41 | `merchant_single_subsidy_rate` | `decimal(10,6)` |  | 是 | 商家独补率 = 商家b补金额 / GMV |
-| 42 | `merchant_card_sales_rate` | `decimal(10,6)` |  | 是 | 商家售卡收入率 = 商家券后售卡收入 / GMV |
-| 43 | `gross_profit` | `decimal(20,6)` |  | 是 | 毛利 = 商家TR + 商家售卡收入率 - 商家独补率 - 1% |
-| 44 | `created_time` | `datetime` |  | 是 | 数据创建时间 |
-| 45 | `updated_time` | `datetime` |  | 是 | 数据更新时间 |
+| 22 | `tr_value` | `decimal(20,6)` |  | 是 | 品牌抽佣值 |
+| 23 | `tr_total` | `decimal(20,6)` |  | 是 | 总抽佣值 |
+| 24 | `merchant_coupon_sales_revenue` | `decimal(20,4)` |  | 是 | 商家券后售卡收入（元） |
+| 25 | `response_rate` | `decimal(10,6)` |  | 是 | 应答率 = 应答量 / 乘客发单量 |
+| 26 | `pk_success_rate` | `decimal(10,6)` |  | 是 | PK成功率（直接取订单表均值） |
+| 27 | `transaction_rate` | `decimal(10,6)` |  | 是 | 成交率 = 完单量 / 乘客发单量 |
+| 28 | `average_order_price` | `decimal(20,4)` |  | 是 | 单均价 = GMV / 完单量 |
+| 29 | `completion_rate_after_response` | `decimal(10,6)` |  | 是 | 应答后完单率 = 完单量 / 应答量 |
+| 30 | `per_capita_online_duration_hour` | `decimal(20,4)` |  | 是 | 人均在线时长（小时） = 在线时长 / 在线司机数 |
+| 31 | `service_duration_ratio` | `decimal(10,6)` |  | 是 | 服务时长占比 = 服务时长 / 在线时长 |
+| 32 | `per_capita_completion_count` | `decimal(10,4)` |  | 是 | 人均完单量 = 完单量 / 完单司机数 |
+| 33 | `completion_per_hour` | `decimal(10,4)` |  | 是 | 每小时完单量（直接取运力表均值） |
+| 34 | `forced_co_subsidy_coupon_gmv` | `decimal(20,4)` |  | 是 | 强制共补卡券活动的总订单GMV（补贴类型="强制共补"） |
+| 35 | `forced_co_subsidy_zero_tr_activity_gmv` | `decimal(20,4)` |  | 是 | 强制共补0TR营销活动的总订单GMV（奖励模板="0TR"且补贴类型="强制共补"） |
+| 36 | `co_subsidy_gmv` | `decimal(20,4)` |  | 是 | 共补GMV = 强制共补卡券GMV + 强制共补0TR营销GMV |
+| 37 | `total_tr` | `decimal(20,6)` |  | 是 | 总TR = tr_total（直接取值） |
+| 38 | `merchant_tr` | `decimal(20,6)` |  | 是 | 商家TR = tr_value（直接取值） |
+| 39 | `merchant_single_subsidy_rate` | `decimal(10,6)` |  | 是 | 商家独补率 = 商家b补金额 / GMV |
+| 40 | `merchant_card_sales_rate` | `decimal(10,6)` |  | 是 | 商家售卡收入率 = 商家券后售卡收入 / GMV |
+| 41 | `gross_profit` | `decimal(20,6)` |  | 是 | 线上毛利率 = 商家TR + 商家售卡收入率 - 商家独补率 - 1% |
+| 42 | `created_time` | `datetime` |  | 是 | 数据创建时间 |
+| 43 | `updated_time` | `datetime` |  | 是 | 数据更新时间 |
+| 44 | `online_gross_profit` | `double` |  | 是 | 线上毛利值 = 品牌抽佣 + 商家券后售卡收入 - (营销表+卡券表商家补贴) - GMV*1% |
 
 ## honghu_driver_evaluation_data
 

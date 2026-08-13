@@ -1,0 +1,6 @@
+interface:
+  display_name: "FOG旧初始化入口"
+  short_description: "检查FOG旧初始化配置并路由到当前tools/fog.py入口"
+  default_prompt: "使用 $lx-init 检查旧初始化配置，并给出当前tools/fog.py兼容命令与缺项。"
+policy:
+  allow_implicit_invocation: false

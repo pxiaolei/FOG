@@ -77,7 +77,7 @@ DEFAULT_PERSONS = ["雷维亮"]
 # CLI 参数
 # ========================================
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="按运营主体/城市/品牌拆表工具")
     parser.add_argument("--mode", "-m", type=int, choices=[1, 2, 3, 4],
                         help="拆分维度: 1=运营主体, 2=城市, 3=品牌→运营主体, 4=纯品牌")
@@ -87,7 +87,14 @@ def parse_args():
                         help="保留的sheet名称，逗号分隔")
     parser.add_argument("--config", action="store_true",
                         help="重新配置")
-    return parser.parse_args()
+    parser.add_argument("--confirmed", action="store_true",
+                        help="确认生成拆分文件、压缩包、日志并移动原表")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="只预览，不写文件、不移动原表、不连接公司库；默认行为")
+    args = parser.parse_args(argv)
+    if args.confirmed and args.dry_run:
+        parser.error("--confirmed 和 --dry-run 不能同时使用")
+    return args
 
 
 # ========================================
@@ -785,14 +792,36 @@ def write_processing_log(log_dir, log_entries, split_mode, person_list, default_
 # 主函数
 # ========================================
 
-def main():
+def main(argv=None):
     print("=" * 60)
     print("按运营主体/城市/品牌拆表工具（独立版）")
     print("=" * 60)
 
-    args = parse_args()
+    args = parse_args(argv)
     force_config = args.config
     config = load_config()
+
+    if not args.confirmed:
+        if force_config:
+            print("\n预览模式不会修改配置；确认重新配置需追加 --confirmed。")
+        if not config:
+            print("\n未找到 lx_zhutichaibiao 配置。预览模式不会创建配置或目录。")
+            return 0
+        work_dir = Path(config["工作目录"])
+        todo_dir = work_dir / "输入"
+        todo_files = (
+            sorted(todo_dir.glob("*.xlsx")) + sorted(todo_dir.glob("*.xlsm"))
+            if todo_dir.is_dir()
+            else []
+        )
+        print("\n预览模式：未连接公司库，未创建目录，未生成/压缩文件，未移动原表。")
+        print(f"工作目录: {work_dir}")
+        print(f"待拆目录存在: {todo_dir.is_dir()}")
+        print(f"检测到 Excel 文件: {len(todo_files)}")
+        for file_path in todo_files:
+            print(f"  - {file_path.name}")
+        print("确认输入和目标后追加 --confirmed 执行。")
+        return 0
 
     if not config or force_config:
         config = interactive_setup()
@@ -920,7 +949,8 @@ def main():
     print("\n" + "=" * 60)
     print("拆分完成")
     print("=" * 60)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

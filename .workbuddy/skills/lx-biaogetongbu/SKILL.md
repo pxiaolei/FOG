@@ -1,18 +1,6 @@
 ---
 name: lx-biaogetongbu
-description: 表格同步工具。用于把 A 表中的记录按字段映射同步到 B 表，覆盖静默乘客登记、背审登记、主体拆表结果同步、农服大文档按品牌城市回填等场景。支持本地 Excel append / update-by-key；在线后端只支持飞书普通电子表格 feishu。
-trigger_keywords:
-  - 表格同步
-  - 同步表格
-  - biaogetongbu
-  - lx-biaogetongbu
-  - 从A表同步到B表
-  - 静默乘客登记
-  - 背审登记
-  - 同步背审申诉
-  - 同步静默乘客
-  - 拆表同步
-location: project
+description: 表格同步工具。用于把 A 表中的记录按字段映射同步到 B 表，覆盖静默乘客登记、背审登记、主体拆表结果同步、农服大文档按品牌城市回填等场景。支持本地 Excel append / update-by-key；在线后端只支持飞书普通电子表格 feishu。当用户要求表格同步、从 A 表同步到 B 表、同步背审申诉、静默乘客或拆表结果时使用。
 ---
 
 # lx-biaogetongbu — 表格同步
@@ -33,7 +21,7 @@ location: project
 | 本地 Excel | `append` | 已离线验证 |
 | 本地 Excel | `update-by-key` | 已离线验证 |
 | 飞书普通电子表格 | `append` / `update-by-key` | 已接 `feishu` 后端，使用 `lx-feishudocs` 和 WorkBuddy 内置 lark-cli |
-| 飞书普通电子表格 | 运营主体固定场景 | 已接 `operator_workbook_sync.py`，支持背审申诉和静默乘客 |
+| 飞书普通电子表格 | 运营主体固定场景 | 已接 `operator_workbook_sync.py`，支持背审申诉和静默乘客；背审单元格图片可随本次追加行同步 |
 
 不直接写后台系统或数据库。
 
@@ -41,13 +29,14 @@ location: project
 
 - 不删除或修改 A 表原始行。
 - 不自动发送、不自动提交后台。
-- 未传 `--confirmed` 时不写入 B 表。
+- 未传 `--confirmed` 时不写入 B 表，也不创建本地输出、目标备份、处理日志或 summary JSON。
 - 正式写入 B 表前自动备份目标文件。
 - `update-by-key` 只更新 `--update-column` 指定列，不整行覆盖。
 - `update-by-key` 默认不使用空值覆盖 B 表；确需清空时显式传 `--allow-blank-updates`。
 - 在线表格写入必须先 `--dry-run` 看清计划，再 `--confirmed`。
+- 在线 confirmed 写入后必须逐项读回全部更新单元格和全部追加 payload；不提供跳过验证参数，任一错配即失败且不生成成功日志。
 - 未显式指定 `--online-backend` 时默认使用 `feishu`，也就是飞书普通电子表格。
-- 每次运行生成处理日志，记录来源、目标、字段映射、去重键、追加行数和跳过原因。
+- 只有 confirmed 运行生成处理日志；dry-run 只向 stdout 输出来源、目标、字段映射、去重键、预计追加行数和跳过原因。
 
 ## 常用命令
 
@@ -134,14 +123,16 @@ python .workbuddy/skills/lx-biaogetongbu/scripts/operator_workbook_sync.py \
   --all-operators
 ```
 
-默认只预览。真实写入必须显式加 `--confirmed`。
+默认只预览。真实写入必须显式加 `--confirmed`；未 confirmed 时 `--output-json` 不落盘。若指定的 summary 已存在，必须同时传 `--overwrite --confirmed`，且该检查在创建飞书 client 前完成。
 
 固定场景行为：
 
 - `beishen_shensu`：读取 `{运营主体}-背审申诉`，按 `司机ID` 防重复追加到大表；写入后给来源行写 `是否提交=填写已提交`；大表 `背审结果` 有值时回填来源表同名列。
 - `jingmo_chengke`：读取 `{运营主体}-静默乘客`，按 `订单ID + 用户ID（乘客ID）` 防重复追加到大表；写入后给来源行写 `是否提交=填写已提交`。
 - 来源表缺少 `是否提交` 表头时，confirmed 写入会在来源表下一空表头列补上该列。
-- 背审图片列如果属于本次要追加的行，脚本会阻断 confirmed 写入，避免把图片/富文本当纯文本丢失。已存在于大表、仅补提交状态的行不会因图片阻断。
+- 背审图片列如果属于本次要追加的行，脚本会读取普通表格单元格的 `embed-image` 并写入大表对应单元格；写后回读目标单元格确认图片对象数量。
+- 固定运营主体场景会完整读回全部追加行的每个写入单元格、每张图片的 token/URI 身份，以及来源状态/结果更新，不做前 30 条抽样。
+- 浮动图片、无法解析出 `image_token` / `image_uri` 的富文本图片仍会阻断 confirmed 写入，避免把图片/富文本当纯文本丢失。已存在于大表、仅补提交状态的行不会因图片阻断。
 
 ## 参数说明
 
@@ -161,7 +152,7 @@ python .workbuddy/skills/lx-biaogetongbu/scripts/operator_workbook_sync.py \
 | `--source-url` / `--target-url` | 飞书普通表格 URL / spreadsheet token |
 | `--source-tab` / `--target-tab` | 在线表格 sheet 标题或 sheet_id |
 | `--output` | 另存为新文件；不传则正式写入目标表原文件 |
-| `--dry-run` | 只预览，不写 B 表 |
+| `--dry-run` | 只预览，不写 B 表、输出、备份、处理日志或 summary JSON |
 | `--confirmed` | 确认写入 B 表 |
 
 ## 执行步骤
@@ -181,12 +172,13 @@ python .workbuddy/skills/lx-biaogetongbu/scripts/operator_workbook_sync.py \
 4. 读取表头和有效数据。
 5. 生成 dry-run 计划。
 6. 用户确认后通过 `lx-feishudocs` 写入普通 sheet。
-7. 再次读回验证写回结果。
+7. 逐项读回全部写回结果；任一目标坐标与计划 payload 不一致即失败。
 
 写入阶段边界：
 
 - 写入开始后不自动换后端；如果飞书写入失败，直接报告真实失败原因，要求人工确认是否续跑。
 - 本项目后续写表目标是飞书普通电子表格，不使用 Base/智能表格记录接口。
+- `operator_workbook_sync.py` 的固定运营主体场景支持 profile `image_columns` 中的单元格图片同步；通用 `sync_table.py --online` 当前仍只同步标量文本/数字值，不复制图片或其他富文本对象。
 
 ## update-by-key 规则
 
@@ -222,3 +214,21 @@ profile 只能保存字段规则和默认模式，不能保存真实飞书链接
 - `assets/profiles/nongfu_update_by_key.example.json`
 - `assets/profiles/beishen_shensu.json`
 - `assets/profiles/jingmo_chengke.json`
+
+## 执行契约
+
+### 输入
+
+- 已动态确认的 A/B 表路径或飞书普通表格地址、sheet、字段映射、唯一键和同步模式。
+- 是否只预览；任何真实写入都需要显式确认参数。
+
+### 输出
+
+- dry-run stdout 差异摘要，或 confirmed 后的新增/更新/跳过/冲突统计与目标位置。
+- 仅 confirmed 时生成机器可读摘要、处理日志和失败记录；不得把凭证或个人路径写入 profile。
+
+### 验收
+
+- 源行数、匹配数、写入数、跳过数和冲突数可对账，唯一键无意外重复。
+- dry-run/未确认时 B 表、输出路径、备份目录、日志目录和 summary JSON 均保持不变。
+- confirmed 写入后重新读取目标，关键字段与计划一致；未读回不得报告完成。

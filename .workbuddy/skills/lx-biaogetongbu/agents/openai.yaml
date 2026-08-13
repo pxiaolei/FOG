@@ -1,0 +1,6 @@
+interface:
+  display_name: "表格同步"
+  short_description: "按字段映射在本地Excel或飞书普通表格之间同步记录"
+  default_prompt: "使用 $lx-biaogetongbu 先预览表格差异，再按确认的字段映射同步并读回验收。"
+policy:
+  allow_implicit_invocation: false

@@ -111,33 +111,65 @@ def cmd_query(
     output: str = "",
     audit: bool = False,
     no_whitelist: bool = False,
+    full: bool = False,
+    page_size: int = 500,
+    max_rows: int = 10000,
+    overwrite: bool = False,
+    confirmed: bool = False,
 ) -> None:
-    """执行 SQL 查询，支持绕过本地白名单查询新分享表。"""
-    # 自动追加 LIMIT（如果未指定）
-    if sql.lstrip().lower().startswith("select") and "limit" not in sql.lower():
-        sql = f"{sql.rstrip(';')} LIMIT {limit}"
+    """执行 SQL 查询并明确标注结果完整性。"""
+    if full and not (json_output or output or audit):
+        raise RuntimeError("--full 必须同时使用 --json、--audit 或 --output，避免完整结果被终端截断")
+    if output:
+        _preflight_query_output(output, overwrite, confirmed)
 
     saved_path: Path | None = None
-    if json_output or output or audit:
+    if full:
+        package = client.execute_full_audited(
+            sql,
+            question=question,
+            metric=metric,
+            enforce_table_whitelist=not no_whitelist,
+            page_size=page_size,
+            max_rows=max_rows,
+        )
+    else:
         package = client.execute_audited(
             sql,
             question=question,
             metric=metric,
             enforce_table_whitelist=not no_whitelist,
+            default_limit=limit,
         )
-        rows = package["rows"]
-        if output or audit:
-            saved_path = _write_query_run(package, output or "auto")
-        if json_output:
-            print(json.dumps(package, ensure_ascii=False, indent=2, default=str))
-            if saved_path:
-                print(f"\n证据包已保存: {saved_path}")
-            return
-    else:
-        rows = client.execute(sql, enforce_table_whitelist=not no_whitelist)
+    rows = package["rows"]
+    if output or audit:
+        saved_path = _write_query_run(
+            package,
+            output or "auto",
+            overwrite=overwrite,
+            confirmed=confirmed,
+        )
+    if json_output:
+        print(json.dumps(package, ensure_ascii=False, indent=2, default=str))
+        if saved_path:
+            print(f"\n证据包已保存: {saved_path}")
+        return
+    if full:
+        print("\n完整查询已验证")
+        print(f"返回/总行数: {package['returned_rows']}/{package['total_rows']}")
+        print(f"结果 SHA-256: {package['result_sha256']}")
+        print(f"证据包: {saved_path}")
+        return
 
-    print(f"\n查询: {sql}")
+    print(f"\n查询: {package['safe_sql']}")
     print(f"返回: {len(rows)} 行\n")
+    if package["is_complete"] is True:
+        print("完整性: 已验证")
+    elif package["possible_truncation"]:
+        print("完整性: 未确认（返回行数命中 LIMIT，结果可能截断）")
+    else:
+        print("完整性: 未确认")
+    print(f"结果 SHA-256: {package['result_sha256']}\n")
     if saved_path:
         print(f"证据包: {saved_path}\n")
 
@@ -149,9 +181,9 @@ def cmd_query(
     for i, row in enumerate(rows, 1):
         print(f"--- 第 {i} 行 ---")
         for k, v in row.items():
-            val_str = str(v)
+            val_str = str(v) if v is not None else "NULL"
             if len(val_str) > 120:
-                val_str = val_str[:117] + "..."
+                val_str = val_str[:117] + "... [仅显示截断；完整值见 JSON 证据包]"
             print(f"  {k}: {val_str}")
         print()
 
@@ -195,36 +227,69 @@ def cmd_catalog(client: DataReportingClient) -> None:
         print()
 
 
-def cmd_schema(client: DataReportingClient, output: Optional[str] = None) -> None:
+def cmd_schema(
+    client: DataReportingClient,
+    output: Optional[str] = None,
+    *,
+    overwrite: bool = False,
+    confirmed: bool = False,
+) -> None:
     """导出全量 Schema"""
+    output_path = Path(output) if output else None
+    if output_path:
+        _require_output_write_allowed(output_path, overwrite, confirmed)
     schema = client.export_schema()
 
-    if output:
-        with open(output, "w", encoding="utf-8") as f:
-            json.dump(schema, f, ensure_ascii=False, indent=2)
-        print(f"Schema 已导出到: {output}")
+    if output_path:
+        _write_json_file(
+            schema,
+            output_path,
+            overwrite=overwrite,
+            confirmed=confirmed,
+        )
+        print(f"Schema 已导出到: {output_path}")
     else:
         print(json.dumps(schema, ensure_ascii=False, indent=2))
 
 
-def cmd_schema_diff(client: DataReportingClient, json_output: bool = False, output: str = "") -> None:
+def cmd_schema_diff(
+    client: DataReportingClient,
+    json_output: bool = False,
+    output: str = "",
+    *,
+    overwrite: bool = False,
+    confirmed: bool = False,
+) -> None:
     """对比本地 schema 与线上 schema。"""
+    output_path = Path(output) if output else None
+    if output_path:
+        _require_output_write_allowed(output_path, overwrite, confirmed)
     local = load_schema_file(client.schema.schema_path)
     remote = client.export_schema()
     diff = diff_schemas(local, remote)
 
-    if output:
-        _write_json_file(diff, Path(output))
+    if output_path:
+        _write_json_file(
+            diff,
+            output_path,
+            overwrite=overwrite,
+            confirmed=confirmed,
+        )
 
     if json_output:
         print(json.dumps(diff, ensure_ascii=False, indent=2, default=str))
     else:
         print(render_diff_text(diff))
-        if output:
-            print(f"schema diff 已保存: {output}")
+        if output_path:
+            print(f"schema diff 已保存: {output_path}")
 
 
-def cmd_refresh_schema(client: DataReportingClient, yes: bool = False) -> None:
+def cmd_refresh_schema(
+    client: DataReportingClient,
+    confirmed: bool = False,
+    *,
+    yes: bool = False,
+) -> None:
     """刷新 schema.json 和 table_catalog.md；默认只预览 diff。"""
     skill_root = _skill_root()
     schema_path = client.schema.schema_path
@@ -238,8 +303,8 @@ def cmd_refresh_schema(client: DataReportingClient, yes: bool = False) -> None:
         print("无需刷新。")
         return
 
-    if not yes:
-        print("以上为预览结果；如确认刷新，请追加 --yes。")
+    if not (confirmed or yes):
+        print("以上为预览结果；如确认刷新，请追加 --confirmed。")
         return
 
     schema_backup = _backup_file(schema_path)
@@ -401,15 +466,45 @@ def _load_metrics_catalog() -> dict[str, Any]:
         return json.load(f)
 
 
-def _write_query_run(package: dict[str, Any], output: str) -> Path:
-    if output == "auto":
-        path = _default_query_run_path(package)
-    else:
-        path = Path(output)
-        if path.suffix.lower() != ".json":
-            path = path / _default_query_run_filename(package)
-    _write_json_file(package, path)
+def _write_query_run(
+    package: dict[str, Any],
+    output: str,
+    *,
+    overwrite: bool = False,
+    confirmed: bool = False,
+) -> Path:
+    path = _resolve_query_output_path(package, output)
+    _require_output_write_allowed(path, overwrite, confirmed)
+    _write_json_file(
+        package,
+        path,
+        overwrite=overwrite,
+        confirmed=confirmed,
+    )
     return path
+
+
+def _resolve_query_output_path(package: Optional[dict[str, Any]], output: str) -> Path:
+    if output == "auto":
+        if package is None:
+            raise RuntimeError("自动证据包路径只能在查询完成后解析")
+        return _default_query_run_path(package)
+    path = Path(output)
+    if path.suffix.lower() != ".json":
+        if package is None:
+            return path
+        path = path / _default_query_run_filename(package)
+    return path
+
+
+def _require_output_write_allowed(path: Path, overwrite: bool, confirmed: bool) -> None:
+    if path.exists() and not (overwrite and confirmed):
+        raise RuntimeError(f"输出目标已存在，覆盖必须同时传 --overwrite --confirmed: {path}")
+
+
+def _preflight_query_output(output: str, overwrite: bool, confirmed: bool) -> None:
+    if output and output != "auto" and Path(output).suffix.lower() == ".json":
+        _require_output_write_allowed(Path(output), overwrite, confirmed)
 
 
 def _default_query_run_path(package: dict[str, Any]) -> Path:
@@ -423,12 +518,18 @@ def _default_query_run_filename(package: dict[str, Any]) -> str:
     return f"{timestamp}_{digest}.json"
 
 
-def _write_json_file(data: dict[str, Any], path: Path) -> None:
+def _write_json_file(
+    data: dict[str, Any],
+    path: Path,
+    *,
+    overwrite: bool = False,
+    confirmed: bool = False,
+) -> None:
+    _require_output_write_allowed(path, overwrite, confirmed)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2, default=str) + "\n",
-        encoding="utf-8",
-    )
+    mode = "w" if path.exists() and overwrite and confirmed else "x"
+    with path.open(mode, encoding="utf-8") as file_obj:
+        file_obj.write(json.dumps(data, ensure_ascii=False, indent=2, default=str) + "\n")
 
 
 def _backup_file(path: Path) -> Path:
@@ -439,7 +540,7 @@ def _backup_file(path: Path) -> Path:
     return backup_path
 
 
-def main() -> None:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="lx_shujuku — 出行数据报表平台 CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -487,11 +588,20 @@ def main() -> None:
     query_parser = subparsers.add_parser("query", aliases=["q"], help="执行 SQL 查询")
     query_parser.add_argument("sql", help="SQL 语句")
     query_parser.add_argument("--limit", type=int, default=50, help="返回行数上限（默认 50）")
+    query_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="完整结果模式：稳定排序后双遍分页，并用前后计数和哈希验收",
+    )
+    query_parser.add_argument("--page-size", type=int, default=500, help="完整模式分页大小（默认 500）")
+    query_parser.add_argument("--max-rows", type=int, default=10000, help="完整模式最大总行数（默认 10000）")
     query_parser.add_argument("--question", default="", help="原始业务问题，写入证据包")
     query_parser.add_argument("--metric", default="", help="指标口径 ID，写入证据包")
     query_parser.add_argument("--json", dest="json_output", action="store_true", help="输出结构化证据包 JSON")
     query_parser.add_argument("--audit", action="store_true", help="保存结构化证据包到默认目录")
     query_parser.add_argument("--output", "-o", default="", help="保存结构化证据包；可填文件、目录或 auto")
+    query_parser.add_argument("--overwrite", action="store_true", help="允许覆盖已有输出；必须同时传 --confirmed")
+    query_parser.add_argument("--confirmed", action="store_true", help="确认覆盖已有输出")
     query_parser.add_argument(
         "--no-whitelist",
         action="store_true",
@@ -511,15 +621,20 @@ def main() -> None:
     # schema
     schema_parser = subparsers.add_parser("schema", help="导出全量 Schema JSON")
     schema_parser.add_argument("--output", "-o", help="输出文件路径")
+    schema_parser.add_argument("--overwrite", action="store_true", help="允许覆盖已有输出；必须同时传 --confirmed")
+    schema_parser.add_argument("--confirmed", action="store_true", help="确认覆盖已有输出")
 
     # schema-diff
     schema_diff_parser = subparsers.add_parser("schema-diff", help="对比本地 schema 与线上 schema")
     schema_diff_parser.add_argument("--json", dest="json_output", action="store_true", help="输出 JSON")
     schema_diff_parser.add_argument("--output", "-o", help="保存 diff JSON 到指定路径")
+    schema_diff_parser.add_argument("--overwrite", action="store_true", help="允许覆盖已有输出；必须同时传 --confirmed")
+    schema_diff_parser.add_argument("--confirmed", action="store_true", help="确认覆盖已有输出")
 
     # refresh-schema
     refresh_schema_parser = subparsers.add_parser("refresh-schema", help="刷新 schema.json 和 table_catalog.md")
-    refresh_schema_parser.add_argument("--yes", action="store_true", help="确认写入刷新结果并自动备份旧文件")
+    refresh_schema_parser.add_argument("--confirmed", action="store_true", help="确认覆盖 schema/catalog 并自动备份")
+    refresh_schema_parser.add_argument("--yes", action="store_true", help="兼容旧确认参数；等同 --confirmed")
 
     # health
     subparsers.add_parser("health", aliases=["hc"], help="健康检查")
@@ -552,18 +667,27 @@ def main() -> None:
     # 全局参数
     # （已移至 subparsers 定义之前）
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.quiet:
         logging.getLogger().setLevel(logging.WARNING)
 
     if not args.command:
         parser.print_help()
-        sys.exit(0)
+        return 0
 
     if args.command == "metrics":
         cmd_metrics(args.metric_name or "")
-        return
+        return 0
+
+    try:
+        if args.command in ("query", "q") and args.output:
+            _preflight_query_output(args.output, args.overwrite, args.confirmed)
+        elif args.command in {"schema", "schema-diff"} and getattr(args, "output", None):
+            _require_output_write_allowed(Path(args.output), args.overwrite, args.confirmed)
+    except RuntimeError as e:
+        logger.error(str(e))
+        return 1
 
     # 创建客户端
     try:
@@ -572,10 +696,10 @@ def main() -> None:
         logger.error(
             "配置文件未找到，请先编辑项目根目录 config/fog_config.yaml 的 lx_shujuku.api 段"
         )
-        sys.exit(1)
+        return 1
     except Exception as e:
         logger.error(f"初始化客户端失败: {e}")
-        sys.exit(1)
+        return 1
 
     # 路由命令
     try:
@@ -596,6 +720,11 @@ def main() -> None:
                 output=args.output,
                 audit=args.audit,
                 no_whitelist=getattr(args, "no_whitelist", False),
+                full=args.full,
+                page_size=args.page_size,
+                max_rows=args.max_rows,
+                overwrite=args.overwrite,
+                confirmed=args.confirmed,
             )
         elif args.command == "count":
             cmd_count(
@@ -605,11 +734,22 @@ def main() -> None:
                 no_whitelist=getattr(args, "no_whitelist", False),
             )
         elif args.command == "schema":
-            cmd_schema(client, args.output)
+            cmd_schema(
+                client,
+                args.output,
+                overwrite=args.overwrite,
+                confirmed=args.confirmed,
+            )
         elif args.command == "schema-diff":
-            cmd_schema_diff(client, json_output=args.json_output, output=args.output or "")
+            cmd_schema_diff(
+                client,
+                json_output=args.json_output,
+                output=args.output or "",
+                overwrite=args.overwrite,
+                confirmed=args.confirmed,
+            )
         elif args.command == "refresh-schema":
-            cmd_refresh_schema(client, yes=args.yes)
+            cmd_refresh_schema(client, confirmed=args.confirmed, yes=args.yes)
         elif args.command in ("health", "hc"):
             cmd_health(client)
         elif args.command in ("operator-brands", "op"):
@@ -620,8 +760,9 @@ def main() -> None:
             cmd_template(client, args)
     except RuntimeError as e:
         logger.error(str(e))
-        sys.exit(1)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

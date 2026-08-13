@@ -90,6 +90,10 @@ COMMON_POSTER_RULES = """用户本次提供的 TXT 中，所有活动模块默�
 TXT 没有的活动模块不展示，不写"无""暂无""无卡券"。
 活动模块数量不固定：TXT 有几个活动类型就展示几个；不要为了凑模板预设区块而新增空模块、合成模块或替换模块标题。
 日期、星期、时间段、金额、奖励、单量和门槛必须逐字按 TXT 展示；TXT 中已给出星期时，不得自行推算、改写或顺延星期。
+免佣卡价格必须按每个日期独立逐项抄写；不得把前一天价格复用到后一天，也不得为了排版省略、合并或改写金额。
+不得添加 TXT 未要求展示的温馨提示、活动说明、"以APP内显示为准"、安全出行提示或其他兜底文案。
+可展示模块只来自当前 TXT 的【】标题和对应内容；不得从品牌风格、模板示例、历史海报或上一轮任务补充额外权益模块。
+只有 TXT 明确出现【全量活动】标题时才展示"全量活动"模块；"周卡"属于所在原模块，不得单独改写成全量活动。
 模块标题不展示 1/2/3/4/5/6 等序号徽标，统一使用纯模块标题。
 海报文案不得展示"共补""共补免佣""平台共补""是否共补"等内部补贴属性。
 卡券按日期展示，每个日期内先分"全天卡"和"时段卡"，时段卡按时间从早到晚。
@@ -113,6 +117,7 @@ EXCLUDED_SECTION_PATTERNS = (
     ("历史/过期/已结束/仅供参考/明确不展示", re.compile(r"历史|过期|已结束|仅供参考|不展示")),
 )
 META_SECTION_TITLE_PATTERN = re.compile(r"^(品牌|城市|日期|活动日期|说明|备注|不展示内容)$")
+GENERATION_NOTES_SECTION_TITLE_PATTERN = re.compile(r"^(生成要求|版式要求|设计要求|视觉要求|海报要求)$")
 EXCLUDED_LINE_PATTERNS = (
     ("共补/平台共补", re.compile(r"共补|平台共补|是否共补")),
     ("历史/过期/已结束/仅供参考/明确不展示", re.compile(r"历史|过期|已结束|仅供参考|不展示")),
@@ -223,6 +228,24 @@ def log_dir() -> Path:
     path = resolve_fog_path(log_value, Path(__file__))
     path.mkdir(parents=True, exist_ok=True)
     return path.resolve()
+
+
+def configure_logging(*, persistent: bool) -> None:
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    if persistent:
+        run_log_dir = log_dir()
+        handlers.append(
+            logging.FileHandler(
+                run_log_dir / f"{datetime.now().strftime('%Y%m%d')}.log",
+                encoding="utf-8",
+            )
+        )
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=handlers,
+        force=True,
+    )
 
 
 def select_template(template_id: str | None = None) -> dict[str, Any]:
@@ -1242,7 +1265,7 @@ def detect_modules(text: str) -> list[str]:
     for label, pattern in (
         ("免佣/飞涨奖", r"免佣|飞涨|流水"),
         ("卡券概览", r"卡券|全天卡|时段卡"),
-        ("全量活动", r"全量活动|周卡"),
+        ("全量活动", r"全量活动"),
         ("新人权益", r"新人|成长奖|首单"),
         ("司邀司", r"司邀司|邀请"),
         ("定向活动", r"定向"),
@@ -1358,6 +1381,9 @@ def filter_display_content(text: str) -> tuple[str, list[str]]:
     for section in split_activity_sections(text):
         title = str(section.get("title") or "")
         lines = [str(line) for line in section.get("lines") or []]
+        if GENERATION_NOTES_SECTION_TITLE_PATTERN.search(title):
+            excluded.append(f"{title}：仅作为生成要求，不展示为海报活动内容")
+            continue
         matched_section_exclusion = next(
             (label for label, pattern in EXCLUDED_SECTION_PATTERNS if pattern.search(title)),
             None,
@@ -1381,6 +1407,19 @@ def filter_display_content(text: str) -> tuple[str, list[str]]:
 
     display_text = "\n\n".join(block for block in display_blocks if block)
     return display_text or text, sorted(set(excluded))
+
+
+def extract_generation_notes(text: str) -> str:
+    note_blocks: list[str] = []
+    for section in split_activity_sections(text):
+        title = str(section.get("title") or "")
+        if not GENERATION_NOTES_SECTION_TITLE_PATTERN.search(title):
+            continue
+        lines = [str(line).strip() for line in section.get("lines") or []]
+        body = "\n".join(line for line in lines[1:] if line)
+        if body:
+            note_blocks.append(body)
+    return "\n\n".join(note_blocks)
 
 
 def brand_safe_display_content(text: str, brand: dict[str, Any]) -> str:
@@ -1451,6 +1490,7 @@ def compile_prompt(
     asset_mode: str = DEFAULT_ASSET_MODE,
     size_plan: dict[str, Any] | None = None,
     qr_retry_note: str | None = None,
+    generation_notes: str | None = None,
 ) -> str:
     display = brand.get("display") if isinstance(brand.get("display"), dict) else {}
     brand_name = str(display.get("poster_brand_name") or brand.get("canonical_name"))
@@ -1479,6 +1519,12 @@ def compile_prompt(
         content_layout_rules = f"画幅策略：固定海报画幅 {poster_size or '9:16'}。即使内容偏多，也不要改变输出画幅。"
     else:
         content_layout_rules = f"画幅策略：常规海报画幅 {poster_size or '9:16'}。保持模板的常规竖版信息层级。"
+    generation_notes_block = ""
+    if generation_notes:
+        generation_notes_block = (
+            "\n本次用户指定版式要求（只用于排版和视觉层级，不要作为海报正文逐字展示）：\n"
+            f"{generation_notes}\n"
+        )
     layout_block = ""
     mode_rules = REFERENCE_IMAGE_RULES
     if asset_mode == ASSET_MODE_OVERLAY:
@@ -1542,6 +1588,7 @@ def compile_prompt(
 {ACTIVITY_LAYOUT_RULES}
 {mode_rules}
 {content_layout_rules}
+{generation_notes_block}
 {retry_block}
 请从下面"可展示活动内容"中提取活动内容，并尽量覆盖其中所有模块。不要编造城市、日期、金额、奖励、门槛或活动规则。
 已排除内容：{"；".join(excluded_content or ["无"])}
@@ -2016,6 +2063,7 @@ def generate_one(
     txt_path = Path(str(row["path"]))
     txt_content = read_text_guess(txt_path)
     display_content, excluded_content = filter_display_content(txt_content)
+    generation_notes = extract_generation_notes(txt_content)
     model_display_content = brand_safe_display_content(display_content, brand)
     size_plan = poster_size_plan(
         display_text=display_content,
@@ -2061,6 +2109,7 @@ def generate_one(
             asset_mode=asset_mode,
             size_plan=size_plan,
             qr_retry_note=qr_retry_note,
+            generation_notes=generation_notes,
         )
         tmp_path = tmp_dir / f"{safe_filename(brand['brand_id'])}_{safe_filename(city)}_{attempt + 1}.png"
         try:
@@ -2088,6 +2137,7 @@ def generate_one(
                         "display_content": display_content,
                         "model_display_content": model_display_content,
                         "excluded_content": excluded_content,
+                        "generation_notes": generation_notes,
                         "final_path": str(final_path),
                     },
                 )
@@ -2106,6 +2156,7 @@ def generate_one(
                         "display_content": display_content,
                         "model_display_content": model_display_content,
                         "excluded_content": excluded_content,
+                        "generation_notes": generation_notes,
                         "prompt": prompt,
                         "reference_images": [str(path) for path in refs],
                         "reference_image_order": ["template_example", "brand_logo", "brand_qr"][: len(refs)],
@@ -2179,6 +2230,7 @@ def generate_one(
                     "display_content": display_content,
                     "model_display_content": model_display_content,
                     "excluded_content": excluded_content,
+                    "generation_notes": generation_notes,
                     "prompt": prompt,
                     "reference_images": [str(path) for path in refs],
                     "reference_image_order": ["template_example", "brand_logo", "brand_qr"][: len(refs)],
@@ -2249,21 +2301,11 @@ def generate_one(
 
 
 def main() -> int:
-    # 配置 logging：控制台输出 + 文件日志
-    run_log_dir = log_dir()
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stderr),
-            logging.FileHandler(run_log_dir / f"{datetime.now().strftime('%Y%m%d')}.log", encoding="utf-8"),
-        ],
-    )
-
     parser = argparse.ArgumentParser(description="WorkBuddy poster batch generator using configured image providers.")
     parser.add_argument("--check", action="store_true", help="Validate dependencies, brand assets, templates, and source QR codes without generating images.")
     parser.add_argument("--check-brand-locks", action="store_true", help="Check brand-template bindings, source assets, source QR decoding, and optional legacy overlay coordinates.")
     parser.add_argument("--check-providers", action="store_true", help="Check image provider config and base_url connectivity without generating images.")
+    parser.add_argument("--confirmed-network", action="store_true", help="Confirm network access for --check-providers. Does not authorize image generation.")
     parser.add_argument("--smoke-provider", help="Run one real minimal image generation call for a provider. Requires --confirmed and may incur API cost.")
     parser.add_argument("--smoke-output-dir", help="Directory for --smoke-provider output image.")
     parser.add_argument("--smoke-prompt", default="A simple clean square test image with a single blue circle on a white background.", help="Prompt for --smoke-provider.")
@@ -2299,6 +2341,7 @@ def main() -> int:
     parser.add_argument("--workers", type=int, default=1, help="Parallel workers for brand generation (default: 1, sequential).")
     parser.add_argument("--json", action="store_true", help="Print JSON summary.")
     args = parser.parse_args()
+    configure_logging(persistent=False)
 
     if args.check:
         result = run_check(args.template)
@@ -2317,6 +2360,9 @@ def main() -> int:
         return 0 if result["ok"] else 1
 
     if args.check_providers:
+        if not args.confirmed_network:
+            logger.error("--check-providers 会访问 provider base URL；请追加 --confirmed-network。")
+            return 2
         from image2_client import check_providers
 
         result = check_providers()
@@ -2332,6 +2378,7 @@ def main() -> int:
             return 2
         from image2_client import smoke_test_provider
 
+        configure_logging(persistent=True)
         smoke_dir = (
             Path(args.smoke_output_dir).expanduser().resolve()
             if args.smoke_output_dir
@@ -2365,6 +2412,10 @@ def main() -> int:
 
     if args.text_to_image and args.asset_mode in {ASSET_MODE_HYBRID, ASSET_MODE_INTEGRATED}:
         logger.error("--text-to-image 不传真实 Logo/二维码参考图，不能使用 hybrid/integrated 资产模式；请去掉 --text-to-image，或显式使用 --asset-mode overlay 做旧版后处理。")
+        return 2
+
+    if not args.dry_run and not args.confirmed:
+        logger.error("图片生成需要 --confirmed。请先运行 --dry-run，确认 TXT 内容后，再追加 --confirmed。")
         return 2
 
     paths = collect_input_paths(args)
@@ -2422,10 +2473,6 @@ def main() -> int:
             )
         return 0
 
-    if not args.confirmed:
-        logger.error("图片生成需要 --confirmed。请先运行 --dry-run，确认 TXT 内容后，再追加 --confirmed。")
-        return 2
-
     dependency_errors = import_errors()
     if dependency_errors and not args.skip_qr:
         logger.error("运行时依赖不可用：%s", "；".join(dependency_errors))
@@ -2446,6 +2493,7 @@ def main() -> int:
         logger.error("%s；未调用图片 API。", exc)
         return 1
 
+    configure_logging(persistent=True)
     output_dir, meta_dir, tmp_dir = output_dirs(args)
 
     # 筛选需要生成的行

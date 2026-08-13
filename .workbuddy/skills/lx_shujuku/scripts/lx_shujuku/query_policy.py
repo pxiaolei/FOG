@@ -34,7 +34,8 @@ FORBIDDEN_KEYWORDS = {
 }
 
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-LIMIT_RE = re.compile(r"\blimit\s+(\d+)\b", re.IGNORECASE)
+LIMIT_RE = re.compile(r"\blimit\s+(\d+)(?:\s+offset\s+(\d+))?\b", re.IGNORECASE)
+ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
 
 
 def validate_identifier(name: str, allowed: set[str] | None = None) -> str:
@@ -65,6 +66,7 @@ def ensure_readonly_sql(
     default_limit: int,
     max_limit: int,
     allowed_tables: set[str] | None = None,
+    append_default_limit: bool = True,
 ) -> str:
     """
     返回可安全执行的只读 SQL。
@@ -74,7 +76,7 @@ def ensure_readonly_sql(
     - 禁止多语句和注释
     - 禁止写库/DDL/权限类关键字
     - 可选限制表名必须存在于 schema 白名单
-    - SELECT 未写 LIMIT 时自动追加默认 LIMIT
+    - 默认给未写顶层 LIMIT 的 SELECT 追加限制
     """
     normalized = _strip_trailing_semicolon(sql)
     masked = _mask_string_literals(normalized).lower()
@@ -103,8 +105,12 @@ def ensure_readonly_sql(
 
     _validate_table_references(masked, command, allowed_tables)
 
-    if command == "select":
+    if command == "select" and append_default_limit:
         return _ensure_limit(normalized, default_limit, max_limit)
+    if command == "select":
+        limit = analyze_query_shape(normalized)["top_level_limit"]
+        if limit is not None:
+            validate_limit(limit, max_limit)
     return normalized
 
 
@@ -116,13 +122,71 @@ def _strip_trailing_semicolon(sql: str) -> str:
 
 
 def _ensure_limit(sql: str, default_limit: int, max_limit: int) -> str:
-    limits = [int(match.group(1)) for match in LIMIT_RE.finditer(sql)]
-    if limits:
-        for limit in limits:
-            validate_limit(limit, max_limit)
+    limit = analyze_query_shape(sql)["top_level_limit"]
+    if limit is not None:
+        validate_limit(limit, max_limit)
         return sql
     validate_limit(default_limit, max_limit)
     return f"{sql} LIMIT {default_limit}"
+
+
+def analyze_query_shape(sql: str) -> dict[str, int | bool | None]:
+    """分析最外层 SELECT 的限制与排序，不受字符串或子查询干扰。"""
+    normalized = _strip_trailing_semicolon(sql)
+    masked = _mask_string_literals(normalized)
+    top_level = _mask_nested_parentheses(masked)
+
+    if re.search(r"\blimit\s+\d+\s*,", top_level, re.IGNORECASE):
+        raise RuntimeError("不支持 LIMIT offset,count；请使用 LIMIT count OFFSET offset")
+
+    match = LIMIT_RE.search(top_level)
+    return {
+        "top_level_limit": int(match.group(1)) if match else None,
+        "top_level_offset": int(match.group(2)) if match and match.group(2) else 0,
+        "has_top_level_order_by": bool(ORDER_BY_RE.search(top_level)),
+    }
+
+
+def top_level_order_columns(sql: str) -> list[str]:
+    """解析精确分页允许的简单顶层 ORDER BY 字段。"""
+    normalized = _strip_trailing_semicolon(sql)
+    top_level = _mask_nested_parentheses(_mask_string_literals(normalized))
+    match = re.search(r"\border\s+by\s+(.+?)(?:\blimit\b|$)", top_level, re.IGNORECASE)
+    if not match:
+        return []
+
+    columns: list[str] = []
+    for item in match.group(1).split(","):
+        item_match = re.fullmatch(
+            r"\s*(?:[A-Za-z_][A-Za-z0-9_]*\.)?([A-Za-z_][A-Za-z0-9_]*)"
+            r"(?:\s+(?:asc|desc))?\s*",
+            item,
+            re.IGNORECASE,
+        )
+        if not item_match:
+            raise RuntimeError(
+                "完整查询的 ORDER BY 仅支持简单字段或别名；请先在 SELECT 中定义别名再排序"
+            )
+        columns.append(item_match.group(1))
+    return columns
+
+
+def _mask_nested_parentheses(sql: str) -> str:
+    """保留最外层 SQL，使用空格遮蔽括号及括号内部内容。"""
+    chars: list[str] = []
+    depth = 0
+    for char in sql:
+        if char == "(":
+            depth += 1
+            chars.append(" ")
+        elif char == ")":
+            depth = max(0, depth - 1)
+            chars.append(" ")
+        elif depth:
+            chars.append(" ")
+        else:
+            chars.append(char)
+    return "".join(chars)
 
 
 def _validate_table_references(

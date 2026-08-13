@@ -14,6 +14,7 @@ LX Skill 套件共享 Excel 工具
 """
 
 from copy import copy
+from collections import defaultdict
 import sys
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
@@ -207,9 +208,12 @@ def filter_by_person(mapping: Dict[str, Any], target_persons) -> Tuple[Dict[str,
         return mapping, mapping['all_persons']
 
     if isinstance(target_persons, str):
-        person_list = [p.strip() for p in target_persons.split(",")]
+        person_list = [p.strip() for p in target_persons.split(",") if p.strip()]
     else:
-        person_list = target_persons
+        person_list = [p.strip() for p in target_persons if str(p).strip()]
+
+    if mapping.get("operator_brand_rows"):
+        return _filter_operator_brand_rows_by_person(mapping, person_list), person_list
 
     # 筛选运营主体
     filtered_zhuti = set()
@@ -245,6 +249,77 @@ def filter_by_person(mapping: Dict[str, Any], target_persons) -> Tuple[Dict[str,
     }
 
     return filtered_mapping, person_list
+
+
+def _filter_operator_brand_rows_by_person(
+    mapping: Dict[str, Any],
+    person_list: List[str],
+) -> Dict[str, Any]:
+    """按 operator_brand 行级对接人筛选，避免同主体跨城市串入。"""
+    target_persons = set(person_list)
+    city_to_zhuti: Dict[str, set] = defaultdict(set)
+    brand_to_zhuti: Dict[str, set] = defaultdict(set)
+    brand_city_to_zhuti: Dict[tuple, set] = defaultdict(set)
+    zhuti_to_person: Dict[str, set] = defaultdict(set)
+    filtered_rows: List[Dict[str, str]] = []
+
+    all_zhuti = set()
+    all_cities = set()
+    all_brands = set()
+
+    for row in mapping.get("operator_brand_rows", []):
+        operator = _clean_mapping_value(row.get("operator") or row.get("运营主体"))
+        brand = _clean_mapping_value(row.get("brand") or row.get("品牌"))
+        city = _clean_mapping_value(row.get("city") or row.get("城市"))
+        person = _clean_mapping_value(row.get("contact_person") or row.get("对接人"))
+        if not operator or not city:
+            continue
+
+        # 保留完整码表 key，但非目标对接人的 value 为空，用于拆表时静默过滤。
+        city_to_zhuti.setdefault(city, set())
+        if brand:
+            brand_to_zhuti.setdefault(brand, set())
+            brand_city_to_zhuti.setdefault((brand, city), set())
+
+        if person not in target_persons:
+            continue
+
+        city_to_zhuti[city].add(operator)
+        all_cities.add(city)
+        all_zhuti.add(operator)
+        if brand:
+            brand_to_zhuti[brand].add(operator)
+            brand_city_to_zhuti[(brand, city)].add(operator)
+            all_brands.add(brand)
+        if person:
+            zhuti_to_person[operator].add(person)
+
+        filtered_rows.append({
+            "operator": operator,
+            "brand": brand,
+            "city": city,
+            "contact_person": person,
+        })
+
+    return {
+        "city_to_zhuti": {k: sorted(v) for k, v in city_to_zhuti.items()},
+        "brand_to_zhuti": {k: sorted(v) for k, v in brand_to_zhuti.items()},
+        "brand_city_to_zhuti": {
+            k: sorted(v) for k, v in brand_city_to_zhuti.items()
+        },
+        "zhuti_to_person": {k: sorted(v) for k, v in zhuti_to_person.items()},
+        "all_zhuti": sorted(all_zhuti),
+        "all_cities": sorted(all_cities),
+        "all_brands": sorted(all_brands),
+        "all_persons": person_list,
+        "operator_brand_rows": filtered_rows,
+    }
+
+
+def _clean_mapping_value(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
 def get_split_mode_info(split_mode: str, col_info: Dict[str, Any], file_config: Dict[str, Any]) -> Dict[str, Any]:

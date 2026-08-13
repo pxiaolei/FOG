@@ -1,0 +1,6 @@
+interface:
+  display_name: "农夫协作文档"
+  short_description: "编排总部大文档拆分、主体填写通知和品牌城市回填闭环"
+  default_prompt: "使用 $lx-nongfu 编排大文档拆分、主体填写和按品牌城市回填，并逐阶段读回验收。"
+policy:
+  allow_implicit_invocation: false

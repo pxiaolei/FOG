@@ -780,7 +780,7 @@ def apply_online_requests(client: Any, file_id: str, requests: list[dict[str, An
 
 
 def verify_online_cells(client: Any, file_id: str, sheet_id: str, updates: list[UpdateCell]) -> None:
-    for update in updates[:20]:
+    for update in updates:
         range_text = a1_range(
             update.target_row_number,
             update.target_column_number,
@@ -793,6 +793,29 @@ def verify_online_cells(client: Any, file_id: str, sheet_id: str, updates: list[
             raise SyncError(
                 f"线上写入后验证失败: {range_text} 预期 {update.new_value!r}，实际 {actual!r}"
             )
+
+
+def append_readback_cells(
+    start_row: int,
+    rows: list[dict[str, Any]],
+    target_headers: dict[str, int],
+) -> list[UpdateCell]:
+    cells: list[UpdateCell] = []
+    for offset, row in enumerate(rows):
+        row_number = start_row + offset
+        for column, column_number in sorted(target_headers.items(), key=lambda item: item[1]):
+            cells.append(
+                UpdateCell(
+                    key_text="append",
+                    source_row_number=row_number,
+                    target_row_number=row_number,
+                    target_column=column,
+                    target_column_number=column_number,
+                    old_value=None,
+                    new_value=row.get(column),
+                )
+            )
+    return cells
 
 
 def write_report(
@@ -922,7 +945,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-interval", type=float, default=0.0, help="线上 API 调用最小间隔秒数")
     parser.add_argument("--retries", type=int, default=0, help="线上 API 重试次数")
     parser.add_argument("--rate-limit-sleep", type=int, default=300, help="线上 API 限流重试等待秒数")
-    parser.add_argument("--skip-online-verify", action="store_true", help="线上 confirmed 写入后跳过读回验证")
     parser.add_argument("--report-dir", default="workspace/10表格同步/处理日志", help="处理日志输出目录")
     parser.add_argument("--dry-run", action="store_true", help="只预览，不写入")
     parser.add_argument("--confirmed", action="store_true", help="确认写入")
@@ -1043,34 +1065,37 @@ def run_excel(args: argparse.Namespace, profile: dict[str, Any]) -> int:
             apply_updates_to_sheet(target_ws, updates)
         target_wb.save(save_path)
 
-    report_path = write_report(
-        report_dir,
-        mode=f"{run_mode}/{mode}",
-        backend="excel",
-        source_label=str(source),
-        target_label=str(target),
-        output=output,
-        backup=backup,
-        source_sheet=source_table.sheet_name,
-        target_sheet=target_table.sheet_name,
-        mapping=mapping,
-        literals=literals,
-        key_columns=key_columns,
-        source_count=len(source_table.rows),
-        target_count=len(target_table.rows),
-        append_count=len(append_rows),
-        update_count=len(updates),
-        unchanged_count=unchanged,
-        skipped=skipped,
-        updates=updates,
-    )
+    report_path = None
+    if args.confirmed:
+        report_path = write_report(
+            report_dir,
+            mode=f"{run_mode}/{mode}",
+            backend="excel",
+            source_label=str(source),
+            target_label=str(target),
+            output=output,
+            backup=backup,
+            source_sheet=source_table.sheet_name,
+            target_sheet=target_table.sheet_name,
+            mapping=mapping,
+            literals=literals,
+            key_columns=key_columns,
+            source_count=len(source_table.rows),
+            target_count=len(target_table.rows),
+            append_count=len(append_rows),
+            update_count=len(updates),
+            unchanged_count=unchanged,
+            skipped=skipped,
+            updates=updates,
+        )
 
     print_summary(run_mode, mode, "excel", len(source_table.rows), len(target_table.rows), len(append_rows), len(updates), unchanged, skipped)
     if backup:
         print(f"B 表备份: {backup}")
-    if output:
+    if args.confirmed and output:
         print(f"输出文件: {output}")
-    print(f"处理日志: {report_path}")
+    if report_path:
+        print(f"处理日志: {report_path}")
     return 0
 
 
@@ -1128,43 +1153,52 @@ def run_online(args: argparse.Namespace, profile: dict[str, Any]) -> int:
     run_mode = "dry-run" if args.dry_run else "confirmed"
     if args.confirmed:
         requests = online_update_requests(target_sheet.sheet_id, header_updates)
+        append_checks: list[UpdateCell] = []
         if append_rows:
             start_row = max(target_sheet.row_count, target_header_row) + 1
             requests.extend(online_append_requests(target_sheet.sheet_id, start_row, append_rows, target_table.headers))
+            append_checks = append_readback_cells(start_row, append_rows, target_table.headers)
         if updates:
             requests.extend(online_update_requests(target_sheet.sheet_id, updates))
         if requests:
             apply_online_requests(client, target_sheet.file_id, requests)
-            if not args.skip_online_verify:
-                verify_online_cells(client, target_sheet.file_id, target_sheet.sheet_id, header_updates + updates)
+            verify_online_cells(
+                client,
+                target_sheet.file_id,
+                target_sheet.sheet_id,
+                header_updates + updates + append_checks,
+            )
 
     backend_label = str(getattr(client, "backend_label", "online-sheets"))
-    report_path = write_report(
-        report_dir,
-        mode=f"{run_mode}/{mode}",
-        backend=backend_label,
-        source_label=str(source_url),
-        target_label=str(target_url),
-        output=None,
-        backup=None,
-        source_sheet=source_table.sheet_name,
-        target_sheet=target_table.sheet_name,
-        mapping=mapping,
-        literals=literals,
-        key_columns=key_columns,
-        source_count=len(source_table.rows),
-        target_count=len(target_table.rows),
-        append_count=len(append_rows),
-        update_count=len(updates),
-        unchanged_count=unchanged,
-        skipped=skipped,
-        updates=header_updates + updates,
-    )
+    report_path = None
+    if args.confirmed:
+        report_path = write_report(
+            report_dir,
+            mode=f"{run_mode}/{mode}",
+            backend=backend_label,
+            source_label=str(source_url),
+            target_label=str(target_url),
+            output=None,
+            backup=None,
+            source_sheet=source_table.sheet_name,
+            target_sheet=target_table.sheet_name,
+            mapping=mapping,
+            literals=literals,
+            key_columns=key_columns,
+            source_count=len(source_table.rows),
+            target_count=len(target_table.rows),
+            append_count=len(append_rows),
+            update_count=len(updates),
+            unchanged_count=unchanged,
+            skipped=skipped,
+            updates=header_updates + updates,
+        )
 
     print_summary(run_mode, mode, backend_label, len(source_table.rows), len(target_table.rows), len(append_rows), len(updates), unchanged, skipped)
     if header_updates:
         print(f"将新增/已新增 B 表表头列: {len(header_updates)}")
-    print(f"处理日志: {report_path}")
+    if report_path:
+        print(f"处理日志: {report_path}")
     return 0
 
 

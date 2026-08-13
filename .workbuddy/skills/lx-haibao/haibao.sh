@@ -6,7 +6,7 @@ VENV_PY="$SCRIPT_DIR/.venv/bin/python"
 
 if [ ! -x "$VENV_PY" ]; then
   echo "FAIL: lx-haibao venv Python was not found: $VENV_PY" >&2
-  echo "Run first: ./check_runtime.sh --install" >&2
+  echo "Run first: ./check_runtime.sh --install --confirmed" >&2
   exit 1
 fi
 

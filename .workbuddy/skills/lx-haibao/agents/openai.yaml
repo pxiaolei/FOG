@@ -1,4 +1,6 @@
 interface:
   display_name: "端外海报生成"
-  short_description: "从活动 TXT 生成带真实 Logo 和二维码的司机海报"
-  default_prompt: "Use $lx-haibao to check a driver activity TXT and generate confirmed poster samples."
+  short_description: "从活动TXT、真实品牌素材和二维码生成并校验司机海报"
+  default_prompt: "使用 $lx-haibao 检查活动TXT和品牌素材，先生成确认样张，再生成并逐张校验海报。"
+policy:
+  allow_implicit_invocation: false

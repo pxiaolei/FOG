@@ -23,8 +23,9 @@
 | 江南出行 | `jiangnan` | `template03` |
 | 土生途行 | `tusheng` | `template07` |
 | 网路优行 | `wangluyouxing` | `template10` |
+| 日初、日初出行 | `richuchuxing` | `template10` |
 
-新出现但暂未接入的素材目录：`renwodache`、`richuchuxing`、`wangluchuxing`、`yidayouxing`。用户明确要求接入前，不要为这些目录创建品牌配置。
+新出现但暂未接入或未进入 Git 边界的素材目录：`renwodache`、`wangluchuxing`、`yidayouxing`、`xingfuqianwanjia`。用户明确要求接入前，不要为这些目录创建品牌配置。
 
 ## 绑定模板
 
