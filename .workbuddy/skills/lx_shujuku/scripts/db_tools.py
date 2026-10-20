@@ -116,6 +116,7 @@ def cmd_query(
     max_rows: int = 10000,
     overwrite: bool = False,
     confirmed: bool = False,
+    allow_full_scan: bool = False,
 ) -> None:
     """执行 SQL 查询并明确标注结果完整性。"""
     if full and not (json_output or output or audit):
@@ -140,6 +141,7 @@ def cmd_query(
             metric=metric,
             enforce_table_whitelist=not no_whitelist,
             default_limit=limit,
+            allow_full_scan=allow_full_scan,
         )
     rows = package["rows"]
     if output or audit:
@@ -607,6 +609,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         action="store_true",
         help="绕过本地 schema 白名单，允许查询尚未同步的新分享表",
     )
+    query_parser.add_argument(
+        "--allow-full-scan",
+        action="store_true",
+        help="显式豁免公司库性能门禁（仅本次），并写入豁免记录",
+    )
 
     # count
     count_parser = subparsers.add_parser("count", help="查询表记录数")
@@ -725,6 +732,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 max_rows=args.max_rows,
                 overwrite=args.overwrite,
                 confirmed=args.confirmed,
+                allow_full_scan=getattr(args, "allow_full_scan", False),
             )
         elif args.command == "count":
             cmd_count(

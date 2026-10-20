@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-21T22:32:02.728114+08:00",
+  "generated_at": "2026-09-07T17:49:09.354586+08:00",
   "database": "dataReporting",
   "tables": [
     {
@@ -655,7 +655,7 @@
           "field": "tenant_name",
           "type": "varchar(20)",
           "null": "YES",
-          "key": "",
+          "key": "MUL",
           "default": null,
           "comment": "租户名称"
         },
@@ -1109,7 +1109,7 @@
           "field": "brand_name",
           "type": "varchar(20)",
           "null": "NO",
-          "key": "",
+          "key": "MUL",
           "default": null,
           "comment": "品牌名称"
         },
@@ -1117,7 +1117,7 @@
           "field": "date_day",
           "type": "varchar(20)",
           "null": "NO",
-          "key": "",
+          "key": "MUL",
           "default": null,
           "comment": "日期（天）"
         },
@@ -1220,7 +1220,7 @@
         {
           "field": "online_duration_hour",
           "type": "decimal(10,2)",
-          "null": "NO",
+          "null": "YES",
           "key": "",
           "default": "0.00",
           "comment": "在线时长（小时）"
@@ -1228,7 +1228,7 @@
         {
           "field": "online_duration_old_hour",
           "type": "decimal(10,2)",
-          "null": "NO",
+          "null": "YES",
           "key": "",
           "default": "0.00",
           "comment": "在线时长(旧)（小时）"
@@ -1236,7 +1236,7 @@
         {
           "field": "service_duration_hour",
           "type": "decimal(10,2)",
-          "null": "NO",
+          "null": "YES",
           "key": "",
           "default": "0.00",
           "comment": "服务时长（小时）"
@@ -1252,7 +1252,7 @@
         {
           "field": "per_capita_online_duration_hour",
           "type": "decimal(10,2)",
-          "null": "NO",
+          "null": "YES",
           "key": "",
           "default": "0.00",
           "comment": "人均在线时长（小时）"
@@ -2735,6 +2735,237 @@
       ]
     },
     {
+      "name": "honghu_new_channel_data",
+      "comment": "宏鹄新渠道数据表",
+      "column_count": 28,
+      "columns": [
+        {
+          "field": "id",
+          "type": "bigint(20)",
+          "null": "NO",
+          "key": "PRI",
+          "default": null,
+          "comment": "主键ID"
+        },
+        {
+          "field": "date_day",
+          "type": "varchar(20)",
+          "null": "NO",
+          "key": "MUL",
+          "default": null,
+          "comment": "日期"
+        },
+        {
+          "field": "brand_name",
+          "type": "varchar(50)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "品牌名称"
+        },
+        {
+          "field": "city_name",
+          "type": "varchar(50)",
+          "null": "YES",
+          "key": "MUL",
+          "default": null,
+          "comment": "城市名称"
+        },
+        {
+          "field": "channel_level1",
+          "type": "varchar(100)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "一级渠道"
+        },
+        {
+          "field": "channel_level2",
+          "type": "varchar(100)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "二级渠道"
+        },
+        {
+          "field": "channel_level3",
+          "type": "varchar(100)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "三级渠道"
+        },
+        {
+          "field": "registered_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "注册司机数"
+        },
+        {
+          "field": "first_submit_audit_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "首次提交审核司机数"
+        },
+        {
+          "field": "first_audited_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "首次已审核司机数"
+        },
+        {
+          "field": "audit_passed_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "审核通过司机数"
+        },
+        {
+          "field": "audit_passed_league_new_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "审核通过联盟新司机数"
+        },
+        {
+          "field": "audit_passed_honghu_new_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "审核通过宏鹄新司机数"
+        },
+        {
+          "field": "audit_passed_merchant_new_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "审核通过商家新司机数"
+        },
+        {
+          "field": "audit_passed_return_new_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "审核通过回流新司机数"
+        },
+        {
+          "field": "audit_passed_league_new_first_order_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "审核通过联盟新首单司机数"
+        },
+        {
+          "field": "audit_passed_honghu_new_first_order_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "审核通过宏鹄新首单司机数"
+        },
+        {
+          "field": "audit_passed_merchant_new_first_order_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "审核通过商家新首单司机数"
+        },
+        {
+          "field": "audit_passed_return_new_first_order_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "审核通过回流新首单司机数"
+        },
+        {
+          "field": "first_login_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "首次登录司机数"
+        },
+        {
+          "field": "first_online_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "首次在线司机数"
+        },
+        {
+          "field": "first_order_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "首单司机数"
+        },
+        {
+          "field": "first_order_league_new_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "当日首单且为联盟新首单的司机数"
+        },
+        {
+          "field": "first_order_honghu_new_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "当日首单且为宏鹄新首单的司机数"
+        },
+        {
+          "field": "first_order_merchant_new_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "当日首单且为商家新首单的司机数"
+        },
+        {
+          "field": "first_order_return_driver_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "当日首单且为回流首单的司机数"
+        },
+        {
+          "field": "created_time",
+          "type": "datetime",
+          "null": "YES",
+          "key": "",
+          "default": "CURRENT_TIMESTAMP",
+          "comment": "创建时间"
+        },
+        {
+          "field": "updated_time",
+          "type": "datetime",
+          "null": "YES",
+          "key": "",
+          "default": "CURRENT_TIMESTAMP",
+          "comment": "更新时间"
+        }
+      ]
+    },
+    {
       "name": "honghu_order_data",
       "comment": "宏鹄订单数据离线看板-订单数据表",
       "column_count": 25,
@@ -3684,6 +3915,253 @@
       ]
     },
     {
+      "name": "honghu_special_offer_data",
+      "comment": "宏鹄特惠联盟数据表",
+      "column_count": 30,
+      "columns": [
+        {
+          "field": "id",
+          "type": "bigint(20)",
+          "null": "NO",
+          "key": "PRI",
+          "default": null,
+          "comment": "主键ID"
+        },
+        {
+          "field": "date_day",
+          "type": "varchar(20)",
+          "null": "NO",
+          "key": "MUL",
+          "default": null,
+          "comment": "日期"
+        },
+        {
+          "field": "brand_name",
+          "type": "varchar(50)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "品牌名称"
+        },
+        {
+          "field": "city_name",
+          "type": "varchar(50)",
+          "null": "YES",
+          "key": "MUL",
+          "default": null,
+          "comment": "城市名称"
+        },
+        {
+          "field": "traffic_channel",
+          "type": "varchar(100)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "流量渠道"
+        },
+        {
+          "field": "order_type",
+          "type": "varchar(50)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "订单类型"
+        },
+        {
+          "field": "passenger_order_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "乘客发单量"
+        },
+        {
+          "field": "total_completed_order_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "总完单量"
+        },
+        {
+          "field": "total_gmv",
+          "type": "decimal(20,2)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "总GMV"
+        },
+        {
+          "field": "total_completion_rate",
+          "type": "varchar(20)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "总成交率"
+        },
+        {
+          "field": "response_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "应答量"
+        },
+        {
+          "field": "completed_order_count",
+          "type": "int(11)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "完单量"
+        },
+        {
+          "field": "gmv",
+          "type": "decimal(20,2)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "GMV"
+        },
+        {
+          "field": "completion_rate",
+          "type": "varchar(20)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "成交率"
+        },
+        {
+          "field": "asp",
+          "type": "decimal(20,2)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "ASP（平均客单价）"
+        },
+        {
+          "field": "passenger_per_km_receivable",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "乘客单公里应收"
+        },
+        {
+          "field": "passenger_per_km_actual",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "乘客单公里实收"
+        },
+        {
+          "field": "driver_per_km_payable",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "司机单公里应付"
+        },
+        {
+          "field": "passenger_per_km_receivable_non_special",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "乘客单公里应收（非特价订单）"
+        },
+        {
+          "field": "passenger_per_km_actual_non_special",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "乘客单公里实收（非特价订单）"
+        },
+        {
+          "field": "driver_per_km_payable_non_special",
+          "type": "decimal(20,4)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "司机单公里应付（非特价订单）"
+        },
+        {
+          "field": "pre_response_cancel_rate",
+          "type": "varchar(20)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "应答前取消率"
+        },
+        {
+          "field": "post_response_passenger_cancel_rate",
+          "type": "varchar(20)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "应答后乘客取消率"
+        },
+        {
+          "field": "post_response_driver_cancel_rate",
+          "type": "varchar(20)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "应答后司机取消率"
+        },
+        {
+          "field": "peak_post_response_passenger_cancel_rate",
+          "type": "varchar(20)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "高峰应答后乘客取消率"
+        },
+        {
+          "field": "peak_post_response_driver_cancel_rate",
+          "type": "varchar(20)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "高峰应答后司机取消率"
+        },
+        {
+          "field": "off_peak_post_response_passenger_cancel_rate",
+          "type": "varchar(20)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "平峰应答后乘客取消率"
+        },
+        {
+          "field": "off_peak_post_response_driver_cancel_rate",
+          "type": "varchar(20)",
+          "null": "YES",
+          "key": "",
+          "default": null,
+          "comment": "平峰应答后司机取消率"
+        },
+        {
+          "field": "created_time",
+          "type": "datetime",
+          "null": "YES",
+          "key": "",
+          "default": "CURRENT_TIMESTAMP",
+          "comment": "创建时间"
+        },
+        {
+          "field": "updated_time",
+          "type": "datetime",
+          "null": "YES",
+          "key": "",
+          "default": "CURRENT_TIMESTAMP",
+          "comment": "更新时间"
+        }
+      ]
+    },
+    {
       "name": "honghu_time_split_data",
       "comment": "宏鹄订单运力分时-供需分时明细数据表",
       "column_count": 24,
@@ -3708,7 +4186,7 @@
           "field": "date_day",
           "type": "varchar(20)",
           "null": "NO",
-          "key": "",
+          "key": "MUL",
           "default": null,
           "comment": "日期（天）"
         },
@@ -3899,7 +4377,7 @@
           "field": "brand_name",
           "type": "varchar(64)",
           "null": "NO",
-          "key": "",
+          "key": "MUL",
           "default": null,
           "comment": "品牌名称"
         },
@@ -4065,7 +4543,7 @@
           "field": "tenant_name",
           "type": "varchar(20)",
           "null": "YES",
-          "key": "",
+          "key": "MUL",
           "default": null,
           "comment": "租户名称"
         },

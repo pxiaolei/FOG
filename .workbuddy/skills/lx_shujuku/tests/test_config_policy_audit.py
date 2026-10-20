@@ -162,7 +162,8 @@ class AuditPackageTests(unittest.TestCase):
 
         client = FakeClient()
         audit = client.execute_audited(
-            "SELECT city_name, completed_order_count FROM honghu_order_data",
+            "SELECT city_name, completed_order_count FROM honghu_order_data "
+            "WHERE date_day = '2026-06-02'",
             question="查完单",
             metric="brand_city_daily_completed_orders",
         )
@@ -195,7 +196,7 @@ class AuditPackageTests(unittest.TestCase):
                 return [{"city_name": "上海市"}]
 
         audit = FakeClient().execute_audited(
-            "SELECT city_name FROM honghu_order_data"
+            "SELECT city_name FROM honghu_order_data WHERE date_day = '2026-06-02'"
         )
 
         self.assertIsNone(audit["is_complete"])

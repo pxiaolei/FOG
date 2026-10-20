@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "comment": "公司库只读 SQL 性能门禁配置。mode=warn 只打印不拦截；mode=enforce 拦截。where_exempt_tables 为空表示所有表一视同仁，不设白名单。",
+  "mode": "enforce",
+  "gates": {
+    "require_where": true,
+    "forbid_select_star": true,
+    "forbid_column_function": true,
+    "explain_before_join_or_agg": true
+  },
+  "forbidden_column_functions": [
+    "TRIM",
+    "CAST",
+    "CONVERT",
+    "COLLATE",
+    "UPPER",
+    "LOWER",
+    "YEAR",
+    "MONTH",
+    "DAY",
+    "DATE",
+    "DATE_FORMAT",
+    "SUBSTRING"
+  ],
+  "explain": {
+    "max_estimated_rows": 100000,
+    "forbid_access_types": ["ALL"],
+    "forbid_null_key": true
+  },
+  "where_exempt_tables": []
+}

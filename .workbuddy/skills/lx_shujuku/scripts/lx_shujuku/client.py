@@ -29,7 +29,11 @@ from urllib.error import HTTPError, URLError
 from .operator_brand import build_mabiao_mapping, normalize_operator_brand_rows
 from .query_policy import (
     analyze_query_shape,
+    check_performance_gates,
     ensure_readonly_sql,
+    evaluate_explain_plan,
+    load_perf_gate_config,
+    should_run_explain,
     top_level_order_columns,
     validate_identifier,
     validate_limit,
@@ -37,6 +41,12 @@ from .query_policy import (
 from .schema import SchemaCatalog
 
 logger = logging.getLogger(__name__)
+
+_PERF_GATE_CONFIG_CACHE: dict[str, Any] = {}
+
+GRANT_LOG_PATH = (
+    Path(__file__).resolve().parents[2] / "assets" / "query_runs" / "full_scan_grants.jsonl"
+)
 
 
 class DataReportingClient:
@@ -296,12 +306,68 @@ class DataReportingClient:
             append_default_limit=append_default_limit,
         )
 
+    # ---- 性能门禁 ----
+
+    def _perf_gate_config(self) -> dict[str, Any]:
+        if not _PERF_GATE_CONFIG_CACHE:
+            _PERF_GATE_CONFIG_CACHE.update(load_perf_gate_config())
+        return _PERF_GATE_CONFIG_CACHE
+
+    def _record_full_scan_grant(self, safe_sql: str, violations: list[str]) -> None:
+        """记录一次显式豁免；assets/query_runs 已 gitignore。"""
+        try:
+            GRANT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            entry = {
+                "granted_at": datetime.now(timezone(timedelta(hours=8))).isoformat(),
+                "safe_sql": safe_sql,
+                "bypassed": violations,
+            }
+            with GRANT_LOG_PATH.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            logger.warning("性能门禁：豁免记录写入失败，但本次查询已放行")
+
+    def _enforce_performance_gates(
+        self,
+        safe_sql: str,
+        allow_full_scan: bool = False,
+    ) -> None:
+        """执行前性能门禁。enforce 模式拦截，warn 模式只告警。"""
+        cfg = self._perf_gate_config()
+        violations = check_performance_gates(safe_sql, cfg)
+
+        if should_run_explain(safe_sql, cfg):
+            try:
+                plan = self._execute_prepared_sql(f"EXPLAIN {safe_sql}")
+            except Exception as exc:  # noqa: BLE001 - EXPLAIN 失败必须阻止真实执行
+                violations.append(
+                    f"性能门禁 4：无法取得执行计划（{exc}），已停止本次查询。"
+                )
+            else:
+                violations.extend(evaluate_explain_plan(plan, cfg))
+
+        if not violations:
+            return
+        if allow_full_scan:
+            self._record_full_scan_grant(safe_sql, violations)
+            return
+        if str(cfg.get("mode") or "enforce").lower() == "warn":
+            for item in violations:
+                logger.warning("性能门禁(warn)：%s", item)
+            return
+        raise RuntimeError(
+            "SQL 未通过公司库性能门禁，已停止执行：\n  - "
+            + "\n  - ".join(violations)
+            + "\n确属必要时使用 --allow-full-scan 显式豁免，或先缩小业务范围。"
+        )
+
     def execute(
         self,
         sql: str,
         auto_retry: bool = True,
         enforce_table_whitelist: bool = True,
         default_limit: int | None = None,
+        allow_full_scan: bool = False,
     ) -> list[dict[str, Any]]:
         """
         执行只读 SQL 查询并返回结果。
@@ -309,18 +375,20 @@ class DataReportingClient:
         Args:
             sql: SQL 语句，只允许只读语句
             auto_retry: Token 过期时是否自动重试
+            allow_full_scan: 显式豁免性能门禁，并写入豁免记录
 
         Returns:
             查询结果列表，每行为一个 dict
 
         Raises:
-            RuntimeError: 查询失败时抛出
+            RuntimeError: 查询失败或未通过性能门禁时抛出
         """
         safe_sql = self.prepare_sql(
             sql,
             enforce_table_whitelist=enforce_table_whitelist,
             default_limit=default_limit,
         )
+        self._enforce_performance_gates(safe_sql, allow_full_scan=allow_full_scan)
         return self._execute_prepared_sql(safe_sql)
 
     def execute_audited(
@@ -330,6 +398,7 @@ class DataReportingClient:
         metric: str = "",
         enforce_table_whitelist: bool = True,
         default_limit: int | None = None,
+        allow_full_scan: bool = False,
     ) -> dict[str, Any]:
         """执行查询并返回可用于文档生成的结构化证据包。"""
         tz = timezone(timedelta(hours=8))
@@ -341,6 +410,7 @@ class DataReportingClient:
             enforce_table_whitelist=enforce_table_whitelist,
             default_limit=default_limit,
         )
+        self._enforce_performance_gates(safe_sql, allow_full_scan=allow_full_scan)
         rows = self._execute_prepared_sql(safe_sql)
         duration_ms = round((time.monotonic() - started_monotonic) * 1000, 3)
         shape = analyze_query_shape(safe_sql)
@@ -408,6 +478,9 @@ class DataReportingClient:
         )
         if not safe_sql.lstrip().lower().startswith("select"):
             raise RuntimeError("完整查询仅支持 SELECT")
+
+        # --full 是用户显式声明的完整导出路径，自带双遍校验；不拦截，但记入豁免记录。
+        self._enforce_performance_gates(safe_sql, allow_full_scan=True)
 
         shape = analyze_query_shape(safe_sql)
         if shape["top_level_limit"] is not None:

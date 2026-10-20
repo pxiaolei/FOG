@@ -10,7 +10,7 @@ description: 出行数据报表平台（dataReporting）公司数据库只读访
 提供对 `datareporting.sfczhushou.com` 当前白名单业务表的只读查询能力：
 
 1. **自动登录鉴权**：通过 `/dataReporting/user/login` 获取 Token，缓存复用
-2. **当前 20 张业务表覆盖**：活动、免佣卡、运力、订单、卡券、详情汇总、分时明细、接起率、TR配置、毛利、对账、数据校验、传输统计等
+2. **当前 22 张业务表覆盖**：活动、免佣卡、运力、订单、卡券、详情汇总、分时明细、接起率、TR配置、毛利、对账、数据校验、传输统计、新渠道、特惠联盟等
 3. **表结构浏览**：`describe <table>` 查看任意表的字段、类型、注释
 4. **只读 SQL 查询**：代码层强制只允许 `SELECT` / `SHOW` / `DESCRIBE` / `EXPLAIN`
 5. **operator_brand 码表接口**：提供品牌、城市、运营主体、对接人的稳定映射
@@ -25,7 +25,7 @@ description: 出行数据报表平台（dataReporting）公司数据库只读访
 | 查询接口 | `POST /dataReporting/sql-query/execute` |
 | 鉴权方式 | Header: `token: {token}` |
 
-## 当前 20 张业务表
+## 当前 22 张业务表
 
 | 表名 | 说明 | 字段数 |
 |------|------|--------|
@@ -41,9 +41,11 @@ description: 出行数据报表平台（dataReporting）公司数据库只读访
 | `honghu_data_connect` | 鸿鹄数据对接列表 | 21 |
 | `honghu_detail_data` | 宏鹄详情数据汇总表（汇总数据） | 44 |
 | `honghu_driver_evaluation_data` | 宏鹄司机考核数据表 | 41 |
+| `honghu_new_channel_data` | 宏鹄新渠道数据表 | 28 |
 | `honghu_order_data` | 宏鹄订单数据离线看板-订单数据表 | 25 |
 | `honghu_profit_data` | 宏鹄毛利数据表 | 22 |
 | `honghu_recon_data` | 账单对账数据表 | 69 |
+| `honghu_special_offer_data` | 宏鹄特惠联盟数据表 | 30 |
 | `honghu_time_split_data` | 宏鹄订单运力分时-供需分时明细数据表 | 24 |
 | `honghu_xf_driver_data` | 先锋司机数据 | 8 |
 | `operator_brand` | 运营主体-品牌名称城市对照表 | 11 |

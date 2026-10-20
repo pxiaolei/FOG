@@ -1,6 +1,6 @@
 # dataReporting 数据库表结构目录
 
-> 生成时间：2026-07-21T22:32:02.728114+08:00  |  数据库：dataReporting  |  共 20 张表
+> 生成时间：2026-09-07T17:49:09.354586+08:00  |  数据库：dataReporting  |  共 22 张表
 
 ---
 
@@ -18,14 +18,16 @@
 10. [honghu_data_connect](#honghu-data-connect) — 鸿鹄数据对接列表
 11. [honghu_detail_data](#honghu-detail-data) — 宏鹄详情数据汇总表（汇总数据）
 12. [honghu_driver_evaluation_data](#honghu-driver-evaluation-data) — 宏鹄司机考核数据表
-13. [honghu_order_data](#honghu-order-data) — 宏鹄订单数据离线看板-订单数据表
-14. [honghu_profit_data](#honghu-profit-data) — 宏鹄毛利数据表
-15. [honghu_recon_data](#honghu-recon-data) — 账单对账数据表
-16. [honghu_time_split_data](#honghu-time-split-data) — 宏鹄订单运力分时-供需分时明细数据表
-17. [honghu_xf_driver_data](#honghu-xf-driver-data) — 先锋司机数据
-18. [operator_brand](#operator-brand) — 运营主体-品牌名称城市对照表
-19. [order_real_time_data](#order-real-time-data) — 订单实时累计数据表
-20. [transport_data_report](#transport-data-report) — 鸿鹄传输数据统计明细
+13. [honghu_new_channel_data](#honghu-new-channel-data) — 宏鹄新渠道数据表
+14. [honghu_order_data](#honghu-order-data) — 宏鹄订单数据离线看板-订单数据表
+15. [honghu_profit_data](#honghu-profit-data) — 宏鹄毛利数据表
+16. [honghu_recon_data](#honghu-recon-data) — 账单对账数据表
+17. [honghu_special_offer_data](#honghu-special-offer-data) — 宏鹄特惠联盟数据表
+18. [honghu_time_split_data](#honghu-time-split-data) — 宏鹄订单运力分时-供需分时明细数据表
+19. [honghu_xf_driver_data](#honghu-xf-driver-data) — 先锋司机数据
+20. [operator_brand](#operator-brand) — 运营主体-品牌名称城市对照表
+21. [order_real_time_data](#order-real-time-data) — 订单实时累计数据表
+22. [transport_data_report](#transport-data-report) — 鸿鹄传输数据统计明细
 
 ---
 
@@ -140,7 +142,7 @@
 | # | 字段名 | 类型 | 键 | 可为空 | 注释 |
 |---|--------|------|-----|--------|------|
 | 1 | `id` | `bigint(20)` | `PRI` | 否 | 主键ID |
-| 2 | `tenant_name` | `varchar(20)` |  | 是 | 租户名称 |
+| 2 | `tenant_name` | `varchar(20)` | `MUL` | 是 | 租户名称 |
 | 3 | `tenant_id` | `varchar(20)` |  | 是 | 租户id |
 | 4 | `datae_column_bc7a384cd7_day_real` | `date` |  | 是 | 数据日期 |
 | 5 | `cal_42b6ccdb9832a04000d13c0b00a8f365` | `bigint(20)` |  | 是 | 匹配司机数(data_one_ident=3) |
@@ -209,8 +211,8 @@
 | # | 字段名 | 类型 | 键 | 可为空 | 注释 |
 |---|--------|------|-----|--------|------|
 | 1 | `id` | `bigint(16)` | `PRI` | 否 | 主键ID |
-| 2 | `brand_name` | `varchar(20)` |  | 否 | 品牌名称 |
-| 3 | `date_day` | `varchar(20)` |  | 否 | 日期（天） |
+| 2 | `brand_name` | `varchar(20)` | `MUL` | 否 | 品牌名称 |
+| 3 | `date_day` | `varchar(20)` | `MUL` | 否 | 日期（天） |
 | 4 | `city_name` | `varchar(20)` |  | 否 | 城市名称 |
 | 5 | `supplier` | `varchar(50)` |  | 是 | 供应商名称 |
 | 6 | `agent` | `varchar(50)` |  | 是 | 代理商名称 |
@@ -223,11 +225,11 @@
 | 13 | `valid_driver_conversion_rate` | `decimal(10,4)` |  | 是 | 有效司机转化率 |
 | 14 | `response_driver_count` | `int(10) unsigned` |  | 否 | 应答司机数 |
 | 15 | `completion_driver_count` | `int(10) unsigned` |  | 否 | 完单司机数 |
-| 16 | `online_duration_hour` | `decimal(10,2)` |  | 否 | 在线时长（小时） |
-| 17 | `online_duration_old_hour` | `decimal(10,2)` |  | 否 | 在线时长(旧)（小时） |
-| 18 | `service_duration_hour` | `decimal(10,2)` |  | 否 | 服务时长（小时） |
+| 16 | `online_duration_hour` | `decimal(10,2)` |  | 是 | 在线时长（小时） |
+| 17 | `online_duration_old_hour` | `decimal(10,2)` |  | 是 | 在线时长(旧)（小时） |
+| 18 | `service_duration_hour` | `decimal(10,2)` |  | 是 | 服务时长（小时） |
 | 19 | `driver_completion_rate` | `decimal(10,4)` |  | 是 | 司机完单率 |
-| 20 | `per_capita_online_duration_hour` | `decimal(10,2)` |  | 否 | 人均在线时长（小时） |
+| 20 | `per_capita_online_duration_hour` | `decimal(10,2)` |  | 是 | 人均在线时长（小时） |
 | 21 | `service_duration_ratio` | `decimal(10,2)` |  | 是 | 服务时长占比 |
 | 22 | `per_capita_completion_count` | `decimal(10,2)` |  | 是 | 人均完单量 |
 | 23 | `completion_per_hour` | `decimal(10,2)` |  | 是 | 每小时完单量 |
@@ -444,6 +446,41 @@
 | 40 | `created_time` | `datetime` |  | 是 | 创建时间 |
 | 41 | `updated_time` | `datetime` |  | 是 | 更新时间 |
 
+## honghu_new_channel_data
+
+**宏鹄新渠道数据表**  |  28 个字段
+
+| # | 字段名 | 类型 | 键 | 可为空 | 注释 |
+|---|--------|------|-----|--------|------|
+| 1 | `id` | `bigint(20)` | `PRI` | 否 | 主键ID |
+| 2 | `date_day` | `varchar(20)` | `MUL` | 否 | 日期 |
+| 3 | `brand_name` | `varchar(50)` |  | 是 | 品牌名称 |
+| 4 | `city_name` | `varchar(50)` | `MUL` | 是 | 城市名称 |
+| 5 | `channel_level1` | `varchar(100)` |  | 是 | 一级渠道 |
+| 6 | `channel_level2` | `varchar(100)` |  | 是 | 二级渠道 |
+| 7 | `channel_level3` | `varchar(100)` |  | 是 | 三级渠道 |
+| 8 | `registered_driver_count` | `int(11)` |  | 是 | 注册司机数 |
+| 9 | `first_submit_audit_driver_count` | `int(11)` |  | 是 | 首次提交审核司机数 |
+| 10 | `first_audited_driver_count` | `int(11)` |  | 是 | 首次已审核司机数 |
+| 11 | `audit_passed_driver_count` | `int(11)` |  | 是 | 审核通过司机数 |
+| 12 | `audit_passed_league_new_driver_count` | `int(11)` |  | 是 | 审核通过联盟新司机数 |
+| 13 | `audit_passed_honghu_new_driver_count` | `int(11)` |  | 是 | 审核通过宏鹄新司机数 |
+| 14 | `audit_passed_merchant_new_driver_count` | `int(11)` |  | 是 | 审核通过商家新司机数 |
+| 15 | `audit_passed_return_new_driver_count` | `int(11)` |  | 是 | 审核通过回流新司机数 |
+| 16 | `audit_passed_league_new_first_order_driver_count` | `int(11)` |  | 是 | 审核通过联盟新首单司机数 |
+| 17 | `audit_passed_honghu_new_first_order_driver_count` | `int(11)` |  | 是 | 审核通过宏鹄新首单司机数 |
+| 18 | `audit_passed_merchant_new_first_order_driver_count` | `int(11)` |  | 是 | 审核通过商家新首单司机数 |
+| 19 | `audit_passed_return_new_first_order_driver_count` | `int(11)` |  | 是 | 审核通过回流新首单司机数 |
+| 20 | `first_login_driver_count` | `int(11)` |  | 是 | 首次登录司机数 |
+| 21 | `first_online_driver_count` | `int(11)` |  | 是 | 首次在线司机数 |
+| 22 | `first_order_driver_count` | `int(11)` |  | 是 | 首单司机数 |
+| 23 | `first_order_league_new_driver_count` | `int(11)` |  | 是 | 当日首单且为联盟新首单的司机数 |
+| 24 | `first_order_honghu_new_driver_count` | `int(11)` |  | 是 | 当日首单且为宏鹄新首单的司机数 |
+| 25 | `first_order_merchant_new_driver_count` | `int(11)` |  | 是 | 当日首单且为商家新首单的司机数 |
+| 26 | `first_order_return_driver_count` | `int(11)` |  | 是 | 当日首单且为回流首单的司机数 |
+| 27 | `created_time` | `datetime` |  | 是 | 创建时间 |
+| 28 | `updated_time` | `datetime` |  | 是 | 更新时间 |
+
 ## honghu_order_data
 
 **宏鹄订单数据离线看板-订单数据表**  |  25 个字段
@@ -581,6 +618,43 @@
 | 68 | `created_time` | `datetime` |  | 是 | 创建时间 |
 | 69 | `updated_time` | `datetime` |  | 是 | 更新时间 |
 
+## honghu_special_offer_data
+
+**宏鹄特惠联盟数据表**  |  30 个字段
+
+| # | 字段名 | 类型 | 键 | 可为空 | 注释 |
+|---|--------|------|-----|--------|------|
+| 1 | `id` | `bigint(20)` | `PRI` | 否 | 主键ID |
+| 2 | `date_day` | `varchar(20)` | `MUL` | 否 | 日期 |
+| 3 | `brand_name` | `varchar(50)` |  | 是 | 品牌名称 |
+| 4 | `city_name` | `varchar(50)` | `MUL` | 是 | 城市名称 |
+| 5 | `traffic_channel` | `varchar(100)` |  | 是 | 流量渠道 |
+| 6 | `order_type` | `varchar(50)` |  | 是 | 订单类型 |
+| 7 | `passenger_order_count` | `int(11)` |  | 是 | 乘客发单量 |
+| 8 | `total_completed_order_count` | `int(11)` |  | 是 | 总完单量 |
+| 9 | `total_gmv` | `decimal(20,2)` |  | 是 | 总GMV |
+| 10 | `total_completion_rate` | `varchar(20)` |  | 是 | 总成交率 |
+| 11 | `response_count` | `int(11)` |  | 是 | 应答量 |
+| 12 | `completed_order_count` | `int(11)` |  | 是 | 完单量 |
+| 13 | `gmv` | `decimal(20,2)` |  | 是 | GMV |
+| 14 | `completion_rate` | `varchar(20)` |  | 是 | 成交率 |
+| 15 | `asp` | `decimal(20,2)` |  | 是 | ASP（平均客单价） |
+| 16 | `passenger_per_km_receivable` | `decimal(20,4)` |  | 是 | 乘客单公里应收 |
+| 17 | `passenger_per_km_actual` | `decimal(20,4)` |  | 是 | 乘客单公里实收 |
+| 18 | `driver_per_km_payable` | `decimal(20,4)` |  | 是 | 司机单公里应付 |
+| 19 | `passenger_per_km_receivable_non_special` | `decimal(20,4)` |  | 是 | 乘客单公里应收（非特价订单） |
+| 20 | `passenger_per_km_actual_non_special` | `decimal(20,4)` |  | 是 | 乘客单公里实收（非特价订单） |
+| 21 | `driver_per_km_payable_non_special` | `decimal(20,4)` |  | 是 | 司机单公里应付（非特价订单） |
+| 22 | `pre_response_cancel_rate` | `varchar(20)` |  | 是 | 应答前取消率 |
+| 23 | `post_response_passenger_cancel_rate` | `varchar(20)` |  | 是 | 应答后乘客取消率 |
+| 24 | `post_response_driver_cancel_rate` | `varchar(20)` |  | 是 | 应答后司机取消率 |
+| 25 | `peak_post_response_passenger_cancel_rate` | `varchar(20)` |  | 是 | 高峰应答后乘客取消率 |
+| 26 | `peak_post_response_driver_cancel_rate` | `varchar(20)` |  | 是 | 高峰应答后司机取消率 |
+| 27 | `off_peak_post_response_passenger_cancel_rate` | `varchar(20)` |  | 是 | 平峰应答后乘客取消率 |
+| 28 | `off_peak_post_response_driver_cancel_rate` | `varchar(20)` |  | 是 | 平峰应答后司机取消率 |
+| 29 | `created_time` | `datetime` |  | 是 | 创建时间 |
+| 30 | `updated_time` | `datetime` |  | 是 | 更新时间 |
+
 ## honghu_time_split_data
 
 **宏鹄订单运力分时-供需分时明细数据表**  |  24 个字段
@@ -589,7 +663,7 @@
 |---|--------|------|-----|--------|------|
 | 1 | `id` | `bigint(11)` | `PRI` | 否 | 主键ID |
 | 2 | `brand_name` | `varchar(20)` |  | 是 | 品牌名称 |
-| 3 | `date_day` | `varchar(20)` |  | 否 | 日期（天） |
+| 3 | `date_day` | `varchar(20)` | `MUL` | 否 | 日期（天） |
 | 4 | `city_name` | `varchar(20)` |  | 否 | 城市名称 |
 | 5 | `hour` | `tinyint(3) unsigned` |  | 否 | 小时（0-23） |
 | 6 | `passenger_order_count` | `int(10) unsigned` |  | 否 | 乘客发单量 |
@@ -619,7 +693,7 @@
 | # | 字段名 | 类型 | 键 | 可为空 | 注释 |
 |---|--------|------|-----|--------|------|
 | 1 | `id` | `bigint(11)` | `PRI` | 否 | id |
-| 2 | `brand_name` | `varchar(64)` |  | 否 | 品牌名称 |
+| 2 | `brand_name` | `varchar(64)` | `MUL` | 否 | 品牌名称 |
 | 3 | `date_day` | `varchar(32)` |  | 否 | 日期 |
 | 4 | `city_name` | `varchar(64)` |  | 否 | 日期 |
 | 5 | `xf_driver_count` | `int(11)` |  | 是 | 先锋司机数 |
@@ -652,7 +726,7 @@
 | # | 字段名 | 类型 | 键 | 可为空 | 注释 |
 |---|--------|------|-----|--------|------|
 | 1 | `id` | `bigint(20)` | `PRI` | 否 | 主键ID |
-| 2 | `tenant_name` | `varchar(20)` |  | 是 | 租户名称 |
+| 2 | `tenant_name` | `varchar(20)` | `MUL` | 是 | 租户名称 |
 | 3 | `tenant_id` | `varchar(20)` |  | 是 | 租户id |
 | 4 | `datae_column_b4276e28f8_day_real` | `date` |  | 是 | 数据日期 |
 | 5 | `cal_7202039077` | `bigint(20)` |  | 是 | 匹配数 |
