@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "comment": "公司库只读 SQL 性能门禁配置。mode=warn 只打印不拦截；mode=enforce 拦截。where_exempt_tables 为空表示所有表一视同仁，不设白名单。",
+  "comment": "公司库性能门禁；沿用中央入口对 operator_brand 码表的明确只读全量例外，其余事实表必须限定范围。",
   "mode": "enforce",
   "gates": {
     "require_where": true,
@@ -24,8 +24,12 @@
   ],
   "explain": {
     "max_estimated_rows": 100000,
-    "forbid_access_types": ["ALL"],
+    "forbid_access_types": [
+      "ALL"
+    ],
     "forbid_null_key": true
   },
-  "where_exempt_tables": []
+  "where_exempt_tables": [
+    "operator_brand"
+  ]
 }

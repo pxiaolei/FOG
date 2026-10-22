@@ -18,9 +18,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
 from urllib.request import Request, build_opener, ProxyHandler
@@ -29,24 +31,19 @@ from urllib.error import HTTPError, URLError
 from .operator_brand import build_mabiao_mapping, normalize_operator_brand_rows
 from .query_policy import (
     analyze_query_shape,
-    check_performance_gates,
+    check_performance_gates, evaluate_explain_plan, load_perf_gate_config, should_run_explain,
     ensure_readonly_sql,
-    evaluate_explain_plan,
-    load_perf_gate_config,
-    should_run_explain,
-    top_level_order_columns,
+    referenced_tables,
+    top_level_order_terms,
     validate_identifier,
     validate_limit,
 )
 from .schema import SchemaCatalog
 
 logger = logging.getLogger(__name__)
-
 _PERF_GATE_CONFIG_CACHE: dict[str, Any] = {}
-
-GRANT_LOG_PATH = (
-    Path(__file__).resolve().parents[2] / "assets" / "query_runs" / "full_scan_grants.jsonl"
-)
+MAX_FULL_QUERY_PAGES = 20
+UNBOUNDED_FULL_QUERY_ALLOWLIST = {"operator_brand"}
 
 
 class DataReportingClient:
@@ -306,31 +303,16 @@ class DataReportingClient:
             append_default_limit=append_default_limit,
         )
 
-    # ---- 性能门禁 ----
-
     def _perf_gate_config(self) -> dict[str, Any]:
         if not _PERF_GATE_CONFIG_CACHE:
             _PERF_GATE_CONFIG_CACHE.update(load_perf_gate_config())
         return _PERF_GATE_CONFIG_CACHE
 
-    def _record_full_scan_grant(self, safe_sql: str, violations: list[str]) -> None:
-        """记录一次显式豁免；assets/query_runs 已 gitignore。"""
-        try:
-            GRANT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            entry = {
-                "granted_at": datetime.now(timezone(timedelta(hours=8))).isoformat(),
-                "safe_sql": safe_sql,
-                "bypassed": violations,
-            }
-            with GRANT_LOG_PATH.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        except OSError:
-            logger.warning("性能门禁：豁免记录写入失败，但本次查询已放行")
+
 
     def _enforce_performance_gates(
         self,
         safe_sql: str,
-        allow_full_scan: bool = False,
     ) -> None:
         """执行前性能门禁。enforce 模式拦截，warn 模式只告警。"""
         cfg = self._perf_gate_config()
@@ -348,9 +330,6 @@ class DataReportingClient:
 
         if not violations:
             return
-        if allow_full_scan:
-            self._record_full_scan_grant(safe_sql, violations)
-            return
         if str(cfg.get("mode") or "enforce").lower() == "warn":
             for item in violations:
                 logger.warning("性能门禁(warn)：%s", item)
@@ -358,8 +337,9 @@ class DataReportingClient:
         raise RuntimeError(
             "SQL 未通过公司库性能门禁，已停止执行：\n  - "
             + "\n  - ".join(violations)
-            + "\n确属必要时使用 --allow-full-scan 显式豁免，或先缩小业务范围。"
+            + "\n请先缩小业务范围；必要的例外交维护者联系技术/DBA核对。"
         )
+
 
     def execute(
         self,
@@ -367,7 +347,6 @@ class DataReportingClient:
         auto_retry: bool = True,
         enforce_table_whitelist: bool = True,
         default_limit: int | None = None,
-        allow_full_scan: bool = False,
     ) -> list[dict[str, Any]]:
         """
         执行只读 SQL 查询并返回结果。
@@ -375,20 +354,19 @@ class DataReportingClient:
         Args:
             sql: SQL 语句，只允许只读语句
             auto_retry: Token 过期时是否自动重试
-            allow_full_scan: 显式豁免性能门禁，并写入豁免记录
 
         Returns:
             查询结果列表，每行为一个 dict
 
         Raises:
-            RuntimeError: 查询失败或未通过性能门禁时抛出
+            RuntimeError: 查询失败时抛出
         """
         safe_sql = self.prepare_sql(
             sql,
             enforce_table_whitelist=enforce_table_whitelist,
             default_limit=default_limit,
         )
-        self._enforce_performance_gates(safe_sql, allow_full_scan=allow_full_scan)
+        self._enforce_performance_gates(safe_sql)
         return self._execute_prepared_sql(safe_sql)
 
     def execute_audited(
@@ -398,7 +376,6 @@ class DataReportingClient:
         metric: str = "",
         enforce_table_whitelist: bool = True,
         default_limit: int | None = None,
-        allow_full_scan: bool = False,
     ) -> dict[str, Any]:
         """执行查询并返回可用于文档生成的结构化证据包。"""
         tz = timezone(timedelta(hours=8))
@@ -410,7 +387,7 @@ class DataReportingClient:
             enforce_table_whitelist=enforce_table_whitelist,
             default_limit=default_limit,
         )
-        self._enforce_performance_gates(safe_sql, allow_full_scan=allow_full_scan)
+        self._enforce_performance_gates(safe_sql)
         rows = self._execute_prepared_sql(safe_sql)
         duration_ms = round((time.monotonic() - started_monotonic) * 1000, 3)
         shape = analyze_query_shape(safe_sql)
@@ -464,7 +441,7 @@ class DataReportingClient:
         page_size: int = 500,
         max_rows: int = 10000,
     ) -> dict[str, Any]:
-        """通过稳定排序、双遍分页和前后计数返回可验证的完整结果。"""
+        """通过稳定游标、单遍分页和前后计数返回有边界的完整结果。"""
         page_size = validate_limit(page_size, self.max_limit)
         max_rows = _to_positive_int(max_rows, "max_rows")
         metric_contract = self._metric_contract(metric)
@@ -476,16 +453,21 @@ class DataReportingClient:
             enforce_table_whitelist=enforce_table_whitelist,
             append_default_limit=False,
         )
+        self._enforce_performance_gates(safe_sql)
         if not safe_sql.lstrip().lower().startswith("select"):
             raise RuntimeError("完整查询仅支持 SELECT")
-
-        # --full 是用户显式声明的完整导出路径，自带双遍校验；不拦截，但记入豁免记录。
-        self._enforce_performance_gates(safe_sql, allow_full_scan=True)
 
         shape = analyze_query_shape(safe_sql)
         if shape["top_level_limit"] is not None:
             raise RuntimeError("完整查询不能包含顶层 LIMIT；请交给 --full 分页")
-        order_columns = top_level_order_columns(safe_sql)
+        unbounded_tables = set(referenced_tables(safe_sql)) - UNBOUNDED_FULL_QUERY_ALLOWLIST
+        if unbounded_tables and not shape["has_top_level_where"]:
+            tables = ", ".join(sorted(unbounded_tables))
+            raise RuntimeError(
+                f"完整查询必须包含顶层 WHERE 业务范围；无界表: {tables}"
+            )
+        order_terms = top_level_order_terms(safe_sql)
+        order_columns = [column for column, _direction in order_terms]
         count_before = self._count_query_rows(safe_sql)
         if count_before > max_rows:
             raise RuntimeError(
@@ -494,37 +476,42 @@ class DataReportingClient:
             )
         if count_before > 1 and not order_columns:
             raise RuntimeError("多行完整查询必须使用简单字段组成的顶层 ORDER BY，保证分页顺序稳定")
+        required_pages = (count_before + page_size - 1) // page_size
+        if required_pages > MAX_FULL_QUERY_PAGES:
+            raise RuntimeError(
+                f"完整查询需要 {required_pages} 页，超过完整查询页数上限 "
+                f"{MAX_FULL_QUERY_PAGES}；请缩小日期或业务范围"
+            )
 
-        first_rows, pages_per_pass = self._fetch_full_pages(
-            safe_sql, count_before, page_size, order_columns
-        )
-        second_rows, second_page_count = self._fetch_full_pages(
-            safe_sql, count_before, page_size, order_columns
+        result_rows, page_count = self._fetch_full_pages(
+            safe_sql, count_before, page_size, order_terms
         )
         count_after = self._count_query_rows(safe_sql)
-        first_hash = self._rows_sha256(first_rows)
-        second_hash = self._rows_sha256(second_rows)
-        verified = (
-            count_before == count_after == len(first_rows) == len(second_rows)
-            and first_hash == second_hash
-        )
+        result_hash = self._rows_sha256(result_rows)
+        verified = count_before == count_after == len(result_rows)
         if not verified:
             raise RuntimeError(
-                "完整查询两次读回结果或前后计数不一致；数据可能在查询期间变化，"
+                "完整查询单遍读回行数或前后计数不一致；数据可能在查询期间变化，"
                 "本次不输出为准确结果，请稍后重试"
             )
 
         duration_ms = round((time.monotonic() - started_monotonic) * 1000, 3)
         warnings = self._query_warnings(safe_sql)
         if order_columns:
-            warnings.append("查询服务不提供事务快照；已用稳定排序、双遍结果哈希和前后计数降低漂移风险")
-            verification_method = "ordered_double_read_with_count"
+            warnings.append(
+                "查询服务不提供事务快照；已用唯一稳定游标、单遍读取和前后计数验证完整性；"
+                "无法排除查询期间非排序字段原地变更"
+            )
+            verification_method = "ordered_single_pass_keyset_with_count"
         else:
-            warnings.append("查询服务不提供事务快照；单行结果已用双遍结果哈希和前后计数降低漂移风险")
-            verification_method = "single_row_double_read_with_count"
+            warnings.append(
+                "查询服务不提供事务快照；单行结果已用单次读取和前后计数验证完整性；"
+                "无法排除查询期间值原地变更"
+            )
+            verification_method = "single_row_single_read_with_count"
         return {
             "type": "lx_shujuku.query_run",
-            "version": 2,
+            "version": 3,
             "executed_at": started_at.isoformat(),
             "duration_ms": duration_ms,
             "database": "dataReporting",
@@ -536,15 +523,15 @@ class DataReportingClient:
             "result_mode": "full",
             "requested_limit": None,
             "effective_limit": None,
-            "row_count": len(first_rows),
-            "returned_rows": len(first_rows),
+            "row_count": len(result_rows),
+            "returned_rows": len(result_rows),
             "total_rows": count_before,
             "is_complete": True,
             "possible_truncation": False,
             "order_by_present": bool(order_columns),
             "order_columns": order_columns,
-            "rows": first_rows,
-            "result_sha256": first_hash,
+            "rows": result_rows,
+            "result_sha256": result_hash,
             "schema_snapshot": self._schema_snapshot(),
             "metric_contract": metric_contract,
             "verification": {
@@ -552,10 +539,10 @@ class DataReportingClient:
                 "passed": True,
                 "count_before": count_before,
                 "count_after": count_after,
-                "verification_passes": 2,
-                "pages_per_pass": pages_per_pass,
-                "second_pass_pages": second_page_count,
-                "second_pass_sha256": second_hash,
+                "verification_passes": 1,
+                "page_count": page_count,
+                "cursor_mode": "keyset" if order_columns else "single_row",
+                "max_pages": MAX_FULL_QUERY_PAGES,
             },
             "warnings": warnings,
         }
@@ -578,36 +565,111 @@ class DataReportingClient:
         safe_sql: str,
         total_rows: int,
         page_size: int,
-        order_columns: list[str],
+        order_terms: list[tuple[str, str]],
     ) -> tuple[list[dict[str, Any]], int]:
         rows: list[dict[str, Any]] = []
         page_count = 0
-        for offset in range(0, total_rows, page_size):
-            page_sql = f"{safe_sql} LIMIT {page_size} OFFSET {offset}"
+        seen: set[tuple[str, ...]] = set()
+        previous_key: tuple[Any, ...] | None = None
+        while len(rows) < total_rows:
+            if previous_key is None:
+                page_sql = f"{safe_sql} LIMIT {page_size}"
+            else:
+                page_sql = self._keyset_page_sql(safe_sql, order_terms, previous_key, page_size)
             page = self._execute_prepared_sql(page_sql)
             if not page:
-                raise RuntimeError(f"完整查询在 OFFSET {offset} 提前结束")
-            rows.extend(page)
+                raise RuntimeError(f"完整查询游标在第 {page_count + 1} 页提前结束")
             page_count += 1
+            if len(rows) + len(page) > total_rows:
+                raise RuntimeError("完整查询分页返回行数超过查询前计数；数据可能在查询期间变化")
+            for row in page:
+                index = len(rows) + 1
+                missing = [column for column, _direction in order_terms if column not in row]
+                if missing:
+                    raise RuntimeError(
+                        f"完整查询第 {index} 行缺少 ORDER BY 字段: {', '.join(missing)}"
+                    )
+                raw_key = tuple(row[column] for column, _direction in order_terms)
+                if any(value is None for value in raw_key):
+                    raise RuntimeError("完整查询的 ORDER BY 字段不能包含 NULL；请改用非空稳定键")
+                canonical_key = tuple(self._canonical_value(value) for value in raw_key)
+                if canonical_key in seen:
+                    raise RuntimeError(
+                        "完整查询的 ORDER BY 字段组合不唯一；请追加唯一键或足以唯一定位结果行的字段"
+                    )
+                if previous_key is not None and not self._key_advances(previous_key, raw_key, order_terms):
+                    raise RuntimeError("完整查询结果未按 ORDER BY 严格递增；无法安全推进游标")
+                seen.add(canonical_key)
+                previous_key = raw_key
+                rows.append(row)
 
         if len(rows) != total_rows:
-            raise RuntimeError(
-                f"完整查询分页行数不一致：预期 {total_rows}，实际 {len(rows)}"
-            )
-        seen: set[tuple[str, ...]] = set()
-        for index, row in enumerate(rows, 1):
-            missing = [column for column in order_columns if column not in row]
-            if missing:
-                raise RuntimeError(
-                    f"完整查询第 {index} 行缺少 ORDER BY 字段: {', '.join(missing)}"
-                )
-            key = tuple(self._canonical_value(row[column]) for column in order_columns)
-            if key in seen:
-                raise RuntimeError(
-                    "完整查询的 ORDER BY 字段组合不唯一；请追加唯一键或足以唯一定位结果行的字段"
-                )
-            seen.add(key)
+            raise RuntimeError(f"完整查询分页行数不一致：预期 {total_rows}，实际 {len(rows)}")
         return rows, page_count
+
+    @classmethod
+    def _keyset_page_sql(
+        cls,
+        safe_sql: str,
+        order_terms: list[tuple[str, str]],
+        previous_key: tuple[Any, ...],
+        page_size: int,
+    ) -> str:
+        alias = "__lx_full_page"
+        branches: list[str] = []
+        equals: list[str] = []
+        for (column, direction), value in zip(order_terms, previous_key):
+            qualified = f"{alias}.{column}"
+            operator = ">" if direction == "ASC" else "<"
+            literal = cls._sql_literal(value)
+            branches.append("(" + " AND ".join([*equals, f"{qualified} {operator} {literal}"]) + ")")
+            equals.append(f"{qualified} = {literal}")
+        order_by = ", ".join(f"{alias}.{column} {direction}" for column, direction in order_terms)
+        predicate = " OR ".join(branches)
+        return (
+            f"SELECT * FROM ({safe_sql}) AS {alias} WHERE {predicate} "
+            f"ORDER BY {order_by} LIMIT {page_size}"
+        )
+
+    @classmethod
+    def _key_advances(
+        cls,
+        previous_key: tuple[Any, ...],
+        current_key: tuple[Any, ...],
+        order_terms: list[tuple[str, str]],
+    ) -> bool:
+        for previous, current, (_column, direction) in zip(previous_key, current_key, order_terms):
+            comparison = cls._compare_values(previous, current)
+            if comparison == 0:
+                continue
+            return comparison < 0 if direction == "ASC" else comparison > 0
+        return False
+
+    @classmethod
+    def _compare_values(cls, left: Any, right: Any) -> int:
+        try:
+            return (left > right) - (left < right)
+        except TypeError:
+            left_value = cls._canonical_value(left)
+            right_value = cls._canonical_value(right)
+            return (left_value > right_value) - (left_value < right_value)
+
+    @staticmethod
+    def _sql_literal(value: Any) -> str:
+        if value is None:
+            raise RuntimeError("完整查询游标不能使用 NULL")
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        if isinstance(value, (int, Decimal)):
+            return str(value)
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise RuntimeError("完整查询游标不能使用 NaN 或 Infinity")
+            return repr(value)
+        if isinstance(value, (date, datetime)):
+            value = value.isoformat(sep=" ") if isinstance(value, datetime) else value.isoformat()
+        text = str(value).replace("\\", "\\\\").replace("'", "''")
+        return f"'{text}'"
 
     @staticmethod
     def _canonical_value(value: Any) -> str:
@@ -730,6 +792,46 @@ class DataReportingClient:
         )
         return self._normalize_describe_rows(rows)
 
+    def show_indexes(self, table_name: str) -> list[dict[str, Any]]:
+        """查看本地 schema 白名单表的索引元数据。"""
+        safe_table = self.schema.validate_table_name(table_name)
+        rows = self.execute(f"SHOW INDEX FROM {safe_table}")
+
+        def optional_int(value: Any) -> int | None:
+            if value in (None, ""):
+                return None
+            return int(value)
+
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            visible = row.get("Visible")
+            normalized.append(
+                {
+                    "table": row.get("Table", safe_table),
+                    "unique": int(row.get("Non_unique", 1)) == 0,
+                    "key_name": row.get("Key_name", ""),
+                    "seq_in_index": int(row.get("Seq_in_index", 0)),
+                    "column_name": row.get("Column_name"),
+                    "collation": row.get("Collation"),
+                    "cardinality": optional_int(row.get("Cardinality")),
+                    "sub_part": optional_int(row.get("Sub_part")),
+                    "packed": row.get("Packed"),
+                    "nullable": str(row.get("Null", "")).upper() == "YES",
+                    "index_type": row.get("Index_type", ""),
+                    "comment": row.get("Comment", ""),
+                    "index_comment": row.get("Index_comment", ""),
+                    "visible": None
+                    if visible in (None, "")
+                    else str(visible).upper() != "NO",
+                    "expression": row.get("Expression"),
+                }
+            )
+
+        return sorted(
+            normalized,
+            key=lambda item: (str(item["key_name"]), int(item["seq_in_index"])),
+        )
+
     @staticmethod
     def _normalize_describe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [
@@ -768,16 +870,14 @@ class DataReportingClient:
     def query_by_brand_date(
         self, table: str, brand: str, date: str, limit: int = 50
     ) -> list[dict]:
-        """按品牌和日期查询"""
+        """已禁用：当前活动/卡片表没有以品牌或时间开头的可用索引。"""
         safe_table = self.schema.validate_table_name(table)
-        safe_limit = validate_limit(limit, self.max_limit)
-        sql = (
-            f"SELECT * FROM {safe_table} "
-            f"WHERE business_name = '{self._esc(brand)}' "
-            f"AND DATE(sale_start_time) = '{self._esc(date)}' "
-            f"LIMIT {safe_limit}"
+        if safe_table not in {"activity_data", "card_data"}:
+            raise RuntimeError("按品牌日期模板只支持 activity_data 或 card_data")
+        raise RuntimeError(
+            f"{safe_table} 当前没有以品牌或时间开头的可用索引；"
+            "该模板已失败关闭，请把查询范围和索引需求交技术/DBA核验"
         )
-        return self.execute(sql)
 
     def query_by_city_date(
         self, table: str, city: str, date: str, limit: int = 50
@@ -786,7 +886,7 @@ class DataReportingClient:
         safe_table = self.schema.validate_table_name(table)
         safe_limit = validate_limit(limit, self.max_limit)
         sql = (
-            f"SELECT * FROM {safe_table} "
+            f"SELECT id, date_day, brand_name, city_name FROM {safe_table} "
             f"WHERE city_name = '{self._esc(city)}' "
             f"AND date_day = '{self._esc(date)}' "
             f"LIMIT {safe_limit}"
@@ -796,25 +896,20 @@ class DataReportingClient:
     def query_activity_by_operator(
         self, operator: str, status: Optional[int] = None, limit: int = 50
     ) -> list[dict]:
-        """按运营主体查询活动"""
-        safe_limit = validate_limit(limit, self.max_limit)
-        sql = f"SELECT * FROM activity_data WHERE operator_entity = '{self._esc(operator)}'"
-        if status is not None:
-            sql += f" AND status = {int(status)}"
-        sql += f" LIMIT {safe_limit}"
-        return self.execute(sql)
+        """已禁用：activity_data 没有以运营主体开头的可用索引。"""
+        raise RuntimeError(
+            "activity_data 当前没有以运营主体开头的可用索引；"
+            "该模板已失败关闭，请把查询范围和索引需求交技术/DBA核验"
+        )
 
     def query_coupon_by_product(
         self, product_name: str, limit: int = 50
     ) -> list[dict]:
-        """按卡券商品名称查询"""
-        safe_limit = validate_limit(limit, self.max_limit)
-        sql = (
-            f"SELECT * FROM honghu_coupon_marketing_data "
-            f"WHERE product_name LIKE '%{self._esc(product_name)}%' "
-            f"LIMIT {safe_limit}"
+        """已禁用：商品名称不在卡券表现有复合索引的可搜索前缀中。"""
+        raise RuntimeError(
+            "honghu_coupon_marketing_data 当前没有以商品名称开头的可用索引；"
+            "该模板已失败关闭，请改用品牌、日期、城市和 product_id 范围或交技术/DBA核验"
         )
-        return self.execute(sql)
 
     def query_capacity_by_brand_date(
         self, brand: str, date: str, city: str = "", limit: int = 50
@@ -822,7 +917,9 @@ class DataReportingClient:
         """按品牌和日期查询运力数据"""
         safe_limit = validate_limit(limit, self.max_limit)
         sql = (
-            f"SELECT * FROM honghu_capacity_data "
+            "SELECT id, brand_name, date_day, city_name, supplier, online_driver_count, "
+            "completion_driver_count, online_duration_hour, service_duration_hour "
+            "FROM honghu_capacity_data "
             f"WHERE brand_name = '{self._esc(brand)}' AND date_day = '{self._esc(date)}'"
         )
         if city:
@@ -836,7 +933,9 @@ class DataReportingClient:
         """按品牌和日期查询订单数据"""
         safe_limit = validate_limit(limit, self.max_limit)
         sql = (
-            f"SELECT * FROM honghu_order_data "
+            "SELECT id, brand_name, date_day, city_name, traffic_channel, "
+            "passenger_order_count, response_count, completed_order_count, gmv "
+            "FROM honghu_order_data "
             f"WHERE brand_name = '{self._esc(brand)}' AND date_day = '{self._esc(date)}' "
             f"LIMIT {safe_limit}"
         )
@@ -848,7 +947,9 @@ class DataReportingClient:
         """按品牌和日期查询分时明细"""
         safe_limit = validate_limit(limit, self.max_limit)
         sql = (
-            f"SELECT * FROM honghu_time_split_data "
+            "SELECT id, brand_name, date_day, city_name, hour, passenger_order_count, "
+            "response_count, completed_order_count, online_driver_count, serving_driver_count, "
+            "load_rate, gmv FROM honghu_time_split_data "
             f"WHERE brand_name = '{self._esc(brand)}' AND date_day = '{self._esc(date)}'"
         )
         if city:
@@ -862,7 +963,11 @@ class DataReportingClient:
         """按租户和日期查询运力实时数据"""
         safe_limit = validate_limit(limit, self.max_limit)
         sql = (
-            f"SELECT * FROM driver_real_time_data "
+            "SELECT id, tenant_name, datae_column_bc7a384cd7_day_real, "
+            "cal_42b6ccdb9832a04000d13c0b00a8f365, cal_7050206267d5d6f983310c0fd15ebc9a, "
+            "cal_f26aa9c3cef567bbf2f68eb01a671790, cal_2bf40e137f207dce4e82d799ad25b0ac, "
+            "cal_ebfde248b6edb7171b6b34ef0deff019, pull_time, time_period "
+            "FROM driver_real_time_data "
             f"WHERE tenant_name = '{self._esc(tenant_name)}' "
             f"AND datae_column_bc7a384cd7_day_real = '{self._esc(date)}' "
             f"LIMIT {safe_limit}"
@@ -875,7 +980,10 @@ class DataReportingClient:
         """按租户和日期查询订单实时数据"""
         safe_limit = validate_limit(limit, self.max_limit)
         sql = (
-            f"SELECT * FROM order_real_time_data "
+            "SELECT id, tenant_name, datae_column_b4276e28f8_day_real, "
+            "cal_7202039077, cal_eee801eeed, cal_6bb0fc3c10, cal_7adff81b3c, "
+            "cal_8c37dbc1e0, cal_794655f35b, cal_7eee019f5d, pull_time, time_period "
+            "FROM order_real_time_data "
             f"WHERE tenant_name = '{self._esc(tenant_name)}' "
             f"AND datae_column_b4276e28f8_day_real = '{self._esc(date)}' "
             f"LIMIT {safe_limit}"
@@ -904,7 +1012,7 @@ class DataReportingClient:
             conditions.append(f"city_name = '{self._esc(city)}'")
         where = " AND ".join(conditions) if conditions else "1=1"
         sql = (
-            "SELECT operator_entity, brand_name, city_name, contact_person "
+            "SELECT operator_entity, brand_name, city_name, contact_person, is_opening, open_city_date "
             f"FROM operator_brand WHERE {where} "
             f"ORDER BY operator_entity, brand_name, city_name LIMIT {safe_limit}"
         )
@@ -914,15 +1022,26 @@ class DataReportingClient:
         """返回兼容本地 Excel 码表的映射结构。"""
         return build_mabiao_mapping(self.get_operator_brands(limit=self.max_limit))
 
-    def query_tr_config(self, brand: str = "", city: str = "") -> list[dict]:
+    def query_tr_config(self, date: str = "", brand: str = "", city: str = "") -> list[dict]:
         """查询品牌城市 TR 配置"""
-        conditions = []
+        if not date:
+            raise RuntimeError("TR 配置查询必须提供日期")
+        try:
+            safe_date = datetime.strptime(date, "%Y-%m-%d").date().isoformat()
+        except ValueError as exc:
+            raise RuntimeError("日期必须使用 YYYY-MM-DD") from exc
+        if not brand and not city:
+            raise RuntimeError("TR 配置查询必须至少提供品牌或城市")
+        conditions = [f"date_day = '{safe_date}'"]
         if brand:
             conditions.append(f"brand_name = '{self._esc(brand)}'")
         if city:
             conditions.append(f"city_name = '{self._esc(city)}'")
-        where = " AND ".join(conditions) if conditions else "1=1"
-        return self.execute(f"SELECT * FROM brand_city_tr_data WHERE {where}")
+        where = " AND ".join(conditions)
+        return self.execute(
+            "SELECT id, date_day, brand_name, city_name, tr_value, tr_total "
+            f"FROM brand_city_tr_data WHERE {where}"
+        )
 
     # ---- 工具方法 ----
 
@@ -989,7 +1108,7 @@ class DataReportingClient:
         probe_table = "lx_shujuku_table_probe_missing"
         try:
             self.execute(
-                f"SELECT * FROM {probe_table} LIMIT 1",
+                f"SELECT 1 FROM {probe_table} LIMIT 1",
                 enforce_table_whitelist=False,
             )
         except RuntimeError as exc:

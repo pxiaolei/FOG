@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Check and fast-forward a colleague FOG clone without touching local data."""
+"""Check and fast-forward a official shared workspace clone without touching local data."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -13,8 +15,16 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "tools"))
+from brand_presets import MANIFEST, parse_manifest
 
-OFFICIAL_REPOSITORY = "pxiaolei/FOG"
+
+ROOT = Path(__file__).resolve().parents[4]
+PROFILE_PATH = ROOT / "config/distribution.json"
+PROFILE = json.loads(PROFILE_PATH.read_text(encoding="utf-8")) if PROFILE_PATH.is_file() else {"repository": "pxiaolei/FOG", "kind": "FOG"}
+OFFICIAL_REPOSITORY = PROFILE.get("repository")
+if OFFICIAL_REPOSITORY not in {"pxiaolei/FOG", "pxiaolei/lxworkspace"}:
+    raise ValueError("工作区未绑定官方分发仓；私人源仓不能使用客户端更新")
 UPDATE_BRANCH = "main"
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 REQUIRED_IGNORE_RULES = {
@@ -22,32 +32,19 @@ REQUIRED_IGNORE_RULES = {
     "config/fog_config.yaml",
     "config/personal_config.yaml",
     "config/database.yaml",
+    "config/lx-wenda.json",
+    ".workbuddy/skills/lx-haibao/brands/*.yaml",
+    ".workbuddy/skills/lx-haibao/brand-assets/**",
     ".workbuddy/skills/*/assets/config.yaml",
     "workspace/**",
 }
-ALLOWED_REMOTE_DELETE_ROOTS = tuple(
-    PurePosixPath(path)
-    for path in (
-        ".workbuddy/skills/lx-zhoubao",
-        ".workbuddy/skills/lx-hhbbu",
-        ".workbuddy/skills/lx-dapanribao",
-        ".workbuddy/skills/lx-celuehuodong",
-        ".workbuddy/skills/lx-yuedufandian",
-    )
-)
-ALLOWED_REMOTE_DELETE_PATHS = {
-    ".workbuddy/skills/lxx_share/database.py",
-    ".workbuddy/skills/lxx_share/query_builder.py",
-    ".workbuddy/skills/lxx_share/hhdata_metrics.py",
-    ".workbuddy/skills/lxx_share/metric_definitions.py",
-    ".workbuddy/skills/lxx_share/contract_validation.py",
-    ".workbuddy/skills/lxx_share/formatters.py",
-    ".workbuddy/skills/lxx_share/config.py",
-    ".workbuddy/skills/lxx_share/tests/test_database_conversions.py",
-    ".workbuddy/skills/lxx_share/tests/test_database_write_gate.py",
-    ".workbuddy/skills/lxx_share/tests/test_contract_validation.py",
-}
-
+ALLOWED_REMOTE_DELETE_ROOTS = ()
+ALLOWED_REMOTE_DELETE_PATHS = set()
+# Existing FOG retirement exceptions stay exact; partner default still rejects every deletion.
+if OFFICIAL_REPOSITORY == "pxiaolei/FOG":
+    ALLOWED_REMOTE_DELETE_ROOTS = tuple(PurePosixPath(".workbuddy/skills/" + name) for name in ("lx-zhoubao", "lx-hhbbu", "lx-dapanribao", "lx-celuehuodong", "lx-yuedufandian"))
+    ALLOWED_REMOTE_DELETE_PATHS = {".workbuddy/skills/lxx_share/" + name for name in ("database.py", "query_builder.py", "hhdata_metrics.py", "metric_definitions.py", "contract_validation.py", "formatters.py", "config.py", "tests/test_database_conversions.py", "tests/test_database_write_gate.py", "tests/test_contract_validation.py")}
+    REQUIRED_IGNORE_RULES -= {"config/lx-wenda.json", ".workbuddy/skills/lx-haibao/brands/*.yaml", ".workbuddy/skills/lx-haibao/brand-assets/**"}
 
 @dataclass(frozen=True)
 class ChangedPath:
@@ -72,6 +69,8 @@ def run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         cwd=cwd,
         env=env,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         check=False,
@@ -91,10 +90,10 @@ def find_repo_root(start: Path) -> Path:
         probe = probe.parent
     result = run_git(probe, "rev-parse", "--show-toplevel")
     if result.returncode != 0:
-        raise RuntimeError("当前路径不在 FOG Git 仓库中")
+        raise RuntimeError("当前路径不在共享 Git 仓库中")
     root = Path(result.stdout.strip()).resolve()
     if not (root / ".git").is_dir() or (root / ".git").is_symlink():
-        raise RuntimeError("只允许普通 FOG clone；不接受 worktree、符号链接或非标准 Git 根目录")
+        raise RuntimeError("只允许普通共享仓 clone；不接受 worktree、符号链接或非标准 Git 根目录")
     return root
 
 
@@ -137,7 +136,7 @@ def ensure_clean_main(repo: Path) -> tuple[str, str]:
     return head, origin_url
 
 
-def is_protected_path(raw_path: str) -> bool:
+def is_protected_path(raw_path: str, managed_brands=()) -> bool:
     path = PurePosixPath(raw_path)
     parts = path.parts
     lower_parts = tuple(part.casefold() for part in parts)
@@ -150,15 +149,22 @@ def is_protected_path(raw_path: str) -> bool:
         "config/personal_config.yaml",
         "config/personal_config.yaml.bak",
         "config/database.yaml",
+        "config/lx-wenda.json",
+        ".workbuddy/skills/lx-wenda/config.json",
+        ".workbuddy/skills/lx-wenda/_user_meta.json",
         "config/rds.md",
         ".lx-init-report.md",
         ".fog-update-report.md",
     }
+    if OFFICIAL_REPOSITORY == "pxiaolei/lxworkspace" and lowered.startswith(".workbuddy/skills/lx-haibao/brand-assets/") and raw_path != ".workbuddy/skills/lx-haibao/brand-assets/README.md":
+        return raw_path not in managed_brands
+    if OFFICIAL_REPOSITORY == "pxiaolei/lxworkspace" and lowered.startswith(".workbuddy/skills/lx-haibao/brands/") and path.suffix.casefold() == ".yaml":
+        return raw_path not in managed_brands
     if lowered in exact:
         return True
     if name.startswith(".env") and name != ".env.example":
         return True
-    if parts and parts[0].casefold() == "workspace" and name != ".gitkeep":
+    if parts and parts[0].casefold() == "workspace" and name != ".gitkeep" and raw_path not in {"workspace/README.md", "workspace/08端内宣传图/README.md"}:
         return True
     if lower_parts[:2] in {
         (".workbuddy", "memory"),
@@ -243,6 +249,24 @@ def inspect_remote(repo: Path, local_commit: str, origin_url: str) -> UpdatePlan
             blockers.append("远端更新包含未授权删除: " + ", ".join(deleted[:20]))
 
         tree = git_output(mirror, "ls-tree", "-r", "-z", remote_commit)
+        profile_result = run_git(mirror, "show", f"{remote_commit}:config/distribution.json")
+        if profile_result.returncode == 0:
+            try:
+                if json.loads(profile_result.stdout).get("repository") != OFFICIAL_REPOSITORY:
+                    blockers.append("远端工作区身份与当前官方仓库不一致")
+            except (ValueError, AttributeError):
+                blockers.append("远端工作区身份清单无效")
+        managed_brands = {}
+        manifest_result = run_git(mirror, "show", f"{remote_commit}:{MANIFEST}")
+        if manifest_result.returncode == 0:
+            try:
+                managed_brands = parse_manifest(manifest_result.stdout)["files"]
+                for path, expected in managed_brands.items():
+                    blob = subprocess.run(["git", "show", f"{remote_commit}:{path}"], cwd=mirror, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                    if blob.returncode or hashlib.sha256(blob.stdout).hexdigest() != expected:
+                        blockers.append("远端公开品牌文件缺失或 hash 不符: " + path)
+            except (ValueError, TypeError, AttributeError) as exc:
+                blockers.append("远端公开品牌清单无效: " + type(exc).__name__)
         for entry in tree.split("\0"):
             if not entry:
                 continue
@@ -250,7 +274,7 @@ def inspect_remote(repo: Path, local_commit: str, origin_url: str) -> UpdatePlan
             mode, object_type, _ = metadata.split(" ", 2)
             if mode == "120000" or object_type == "commit":
                 blockers.append(f"远端包含 Windows/安全边界不接受的符号链接或 submodule: {path}")
-            if is_protected_path(path):
+            if is_protected_path(path, managed_brands):
                 blockers.append(f"远端跟踪了本地受保护路径: {path}")
 
         ignore_result = run_git(mirror, "show", f"{remote_commit}:.gitignore")
@@ -309,10 +333,15 @@ def print_plan(plan: UpdatePlan) -> None:
 
 
 def run_validation(repo: Path, command: tuple[str, ...], label: str) -> bool:
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     result = subprocess.run(
         list(command),
         cwd=repo,
         text=True,
+        encoding="utf-8",
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         check=False,
@@ -359,10 +388,10 @@ def apply_update(repo: Path, expected_commit: str) -> int:
 
     index_ok = run_validation(
         repo,
-        (sys.executable, "tools/generate_skill_index.py", "--check"),
+        (sys.executable, "-B", "tools/generate_skill_index.py", "--check"),
         "skill_index_check",
     )
-    config_ok = run_validation(repo, (sys.executable, "tools/fog.py", "check"), "config_check")
+    config_ok = run_validation(repo, ((sys.executable, "-B", "tools/check_distribution.py") if (repo / "tools/check_distribution.py").is_file() else (sys.executable, "-B", "tools/fog.py", "check")), "config_check")
     print(f"updated_head: {actual}")
     if index_ok:
         print(f"result: {'applied' if config_ok else 'applied-with-warnings'}")
@@ -372,8 +401,8 @@ def apply_update(repo: Path, expected_commit: str) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="安全检查并快进同事本地 FOG")
-    parser.add_argument("--repo", type=Path, default=Path.cwd(), help="FOG Git 仓路径，默认当前目录")
+    parser = argparse.ArgumentParser(description="安全检查并快进当前官方工作区")
+    parser.add_argument("--repo", type=Path, default=Path.cwd(), help="共享 Git 仓路径，默认当前目录")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("check", help="只读检查本地状态和远端更新")
     apply_parser = subparsers.add_parser("apply", help="快进到已确认的远端 commit")

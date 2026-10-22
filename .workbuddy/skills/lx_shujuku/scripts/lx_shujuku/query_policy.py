@@ -36,6 +36,38 @@ FORBIDDEN_KEYWORDS = {
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 LIMIT_RE = re.compile(r"\blimit\s+(\d+)(?:\s+offset\s+(\d+))?\b", re.IGNORECASE)
 ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
+WHERE_RE = re.compile(r"\bwhere\b", re.IGNORECASE)
+MAX_TOP_LEVEL_OFFSET = 10000
+UNBOUNDED_SELECT_ALLOWLIST = {"operator_brand"}
+PREDICATE_FUNCTIONS = (
+    "cast",
+    "convert",
+    "date",
+    "lower",
+    "month",
+    "trim",
+    "upper",
+    "year",
+)
+REPORTING_DATE_FIELDS = (
+    "data_date",
+    "date_day",
+    "effect_end_time",
+    "effect_start_time",
+    "end_time",
+    "open_city_date",
+    "partition_date",
+    "pull_time",
+    "sale_end_time",
+    "sale_start_time",
+    "start_time",
+    "datae_column_bc7a384cd7_day_real",
+    "datae_column_b4276e28f8_day_real",
+)
+PREDICATE_BOUNDARY_RE = re.compile(
+    r"\b(where|on|join|group\s+by|having|order\s+by|limit|union)\b",
+    re.IGNORECASE,
+)
 
 
 def validate_identifier(name: str, allowed: set[str] | None = None) -> str:
@@ -104,11 +136,15 @@ def ensure_readonly_sql(
         raise RuntimeError(f"SQL 包含禁止关键字: {', '.join(forbidden)}")
 
     _validate_table_references(masked, command, allowed_tables)
+    if command == "select":
+        _validate_performance_shape(normalized, masked)
 
     if command == "select" and append_default_limit:
         return _ensure_limit(normalized, default_limit, max_limit)
     if command == "select":
-        limit = analyze_query_shape(normalized)["top_level_limit"]
+        shape = analyze_query_shape(normalized)
+        _validate_offset(shape["top_level_offset"])
+        limit = shape["top_level_limit"]
         if limit is not None:
             validate_limit(limit, max_limit)
     return normalized
@@ -122,12 +158,126 @@ def _strip_trailing_semicolon(sql: str) -> str:
 
 
 def _ensure_limit(sql: str, default_limit: int, max_limit: int) -> str:
-    limit = analyze_query_shape(sql)["top_level_limit"]
+    shape = analyze_query_shape(sql)
+    _validate_offset(shape["top_level_offset"])
+    limit = shape["top_level_limit"]
     if limit is not None:
         validate_limit(limit, max_limit)
         return sql
     validate_limit(default_limit, max_limit)
     return f"{sql} LIMIT {default_limit}"
+
+
+def _validate_offset(offset: int | None) -> None:
+    if offset is not None and offset > MAX_TOP_LEVEL_OFFSET:
+        raise RuntimeError(f"OFFSET 不能超过 {MAX_TOP_LEVEL_OFFSET}；请改用稳定游标或缩小查询范围")
+
+
+def _validate_performance_shape(sql: str, masked_sql: str) -> None:
+    """阻断无需执行计划即可确定的高风险查询形态。"""
+    references = set(_extract_table_references(masked_sql))
+    _validate_explicit_projection(masked_sql)
+    _validate_predicates(sql, masked_sql)
+    _validate_business_scope(masked_sql, references)
+
+
+def _validate_explicit_projection(masked_sql: str) -> None:
+    if re.search(
+        r"\bselect\s+(?:distinct\s+)?(?:[A-Za-z_][A-Za-z0-9_]*\.)?\*",
+        masked_sql,
+        re.IGNORECASE,
+    ):
+        raise RuntimeError("禁止 SELECT *；请只选择当前任务需要的明确字段")
+
+
+def _validate_predicates(sql: str, masked_sql: str) -> None:
+    function_pattern = "|".join(re.escape(name) for name in PREDICATE_FUNCTIONS)
+    date_field_pattern = (
+        r"(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:"
+        + "|".join(re.escape(field) for field in REPORTING_DATE_FIELDS)
+        + r")\b"
+    )
+    arithmetic_pattern = (
+        r"(?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*"
+        r"\s*[+\-*/]\s*(?:\d|(?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_])"
+    )
+
+    for raw_predicate, masked_predicate in _predicate_segments(sql, masked_sql):
+        if re.search(rf"\b(?:{function_pattern})\s*\(", masked_predicate, re.IGNORECASE):
+            raise RuntimeError("JOIN/WHERE 谓词列禁止函数包装；请改用裸字段直接比较")
+        if re.search(r"\bcollate\b", masked_predicate, re.IGNORECASE):
+            raise RuntimeError("JOIN/WHERE 谓词列禁止 COLLATE；请先核对字段兼容性")
+        if re.search(arithmetic_pattern, masked_predicate, re.IGNORECASE):
+            raise RuntimeError("JOIN/WHERE 谓词列禁止算术表达式；请改用裸字段范围")
+        if re.search(r"\blike\s*(['\"])\s*%", raw_predicate, re.IGNORECASE):
+            raise RuntimeError("禁止 LIKE 前导通配；请使用精确匹配或可走索引的前缀匹配")
+        if re.search(rf"{date_field_pattern}\s*<=", masked_predicate, re.IGNORECASE):
+            raise RuntimeError("日期范围必须使用半开区间：下界 >=，上界 <")
+        if re.search(rf"{date_field_pattern}\s+between\b", masked_predicate, re.IGNORECASE):
+            raise RuntimeError("日期范围必须使用半开区间，禁止对报表日期字段使用 BETWEEN")
+
+
+def _predicate_segments(sql: str, masked_sql: str) -> list[tuple[str, str]]:
+    tokens = list(PREDICATE_BOUNDARY_RE.finditer(masked_sql))
+    segments: list[tuple[str, str]] = []
+    for index, token in enumerate(tokens):
+        if token.group(1).lower() not in {"where", "on"}:
+            continue
+        end = tokens[index + 1].start() if index + 1 < len(tokens) else len(masked_sql)
+        segments.append((sql[token.end():end], masked_sql[token.end():end]))
+    return segments
+
+
+def _validate_business_scope(masked_sql: str, references: set[str]) -> None:
+    scoped_tables = references - UNBOUNDED_SELECT_ALLOWLIST
+    if not scoped_tables:
+        return
+
+    shape = analyze_query_shape(masked_sql)
+    if shape["has_top_level_where"]:
+        top_level = " ".join(_mask_nested_parentheses(masked_sql).split())
+        if re.search(
+            r"\bwhere\s+1\s*=\s*1\s*(?:group\s+by|order\s+by|limit|$)",
+            top_level,
+            re.IGNORECASE,
+        ):
+            raise RuntimeError("事实查询必须包含真实业务范围，WHERE 1=1 不构成业务范围")
+        return
+
+    if _is_single_row_probe(masked_sql) or _is_boundary_aggregate(masked_sql):
+        return
+    if re.search(
+        r"\bfrom\s*\(\s*select\b[\s\S]*\bwhere\b",
+        masked_sql,
+        re.IGNORECASE,
+    ):
+        return
+
+    tables = ", ".join(sorted(scoped_tables))
+    raise RuntimeError(f"事实查询必须包含顶层 WHERE 业务范围；无界表: {tables}")
+
+
+def _is_single_row_probe(masked_sql: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"\s*select\s+1\s+from\s+[A-Za-z_][A-Za-z0-9_]*\s+limit\s+1\s*",
+            masked_sql,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _is_boundary_aggregate(masked_sql: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"\s*select\s+(?:max|min)\s*\(\s*"
+            r"(?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*\s*\)"
+            r"(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?\s+from\s+"
+            r"[A-Za-z_][A-Za-z0-9_]*(?:\s+limit\s+\d+)?\s*",
+            masked_sql,
+            re.IGNORECASE,
+        )
+    )
 
 
 def analyze_query_shape(sql: str) -> dict[str, int | bool | None]:
@@ -144,22 +294,28 @@ def analyze_query_shape(sql: str) -> dict[str, int | bool | None]:
         "top_level_limit": int(match.group(1)) if match else None,
         "top_level_offset": int(match.group(2)) if match and match.group(2) else 0,
         "has_top_level_order_by": bool(ORDER_BY_RE.search(top_level)),
+        "has_top_level_where": bool(WHERE_RE.search(top_level)),
     }
 
 
 def top_level_order_columns(sql: str) -> list[str]:
     """解析精确分页允许的简单顶层 ORDER BY 字段。"""
+    return [column for column, _direction in top_level_order_terms(sql)]
+
+
+def top_level_order_terms(sql: str) -> list[tuple[str, str]]:
+    """解析精确分页允许的简单顶层 ORDER BY 字段和方向。"""
     normalized = _strip_trailing_semicolon(sql)
     top_level = _mask_nested_parentheses(_mask_string_literals(normalized))
     match = re.search(r"\border\s+by\s+(.+?)(?:\blimit\b|$)", top_level, re.IGNORECASE)
     if not match:
         return []
 
-    columns: list[str] = []
+    terms: list[tuple[str, str]] = []
     for item in match.group(1).split(","):
         item_match = re.fullmatch(
             r"\s*(?:[A-Za-z_][A-Za-z0-9_]*\.)?([A-Za-z_][A-Za-z0-9_]*)"
-            r"(?:\s+(?:asc|desc))?\s*",
+            r"(?:\s+(asc|desc))?\s*",
             item,
             re.IGNORECASE,
         )
@@ -167,8 +323,14 @@ def top_level_order_columns(sql: str) -> list[str]:
             raise RuntimeError(
                 "完整查询的 ORDER BY 仅支持简单字段或别名；请先在 SELECT 中定义别名再排序"
             )
-        columns.append(item_match.group(1))
-    return columns
+        terms.append((item_match.group(1), (item_match.group(2) or "ASC").upper()))
+    return terms
+
+
+def referenced_tables(sql: str) -> list[str]:
+    """返回 SQL 中 FROM/JOIN 引用的简单表名。"""
+    normalized = _strip_trailing_semicolon(sql)
+    return _extract_table_references(_mask_string_literals(normalized).lower())
 
 
 def _mask_nested_parentheses(sql: str) -> str:
@@ -194,13 +356,17 @@ def _validate_table_references(
     command: str,
     allowed_tables: set[str] | None,
 ) -> None:
-    if allowed_tables is None:
-        return
-
-    normalized_allowed = {table.lower() for table in allowed_tables}
+    normalized_allowed = (
+        {table.lower() for table in allowed_tables}
+        if allowed_tables is not None
+        else None
+    )
 
     if command == "show":
         _validate_show_sql(masked_sql, normalized_allowed)
+        return
+
+    if normalized_allowed is None:
         return
 
     if command in {"describe", "desc"}:
@@ -214,9 +380,19 @@ def _validate_table_references(
         _validate_known_table(table_name, normalized_allowed)
 
 
-def _validate_show_sql(masked_sql: str, allowed_tables: set[str]) -> None:
+def _validate_show_sql(masked_sql: str, allowed_tables: set[str] | None) -> None:
     compact = " ".join(masked_sql.split())
     if compact.startswith("show tables") or compact.startswith("show full tables"):
+        return
+
+    index_match = re.fullmatch(
+        r"show\s+index\s+from\s+([A-Za-z_][A-Za-z0-9_]*)",
+        compact,
+    )
+    if index_match:
+        if allowed_tables is None:
+            raise RuntimeError("SHOW INDEX 必须使用本地 schema 白名单")
+        _validate_known_table(index_match.group(1), allowed_tables)
         return
 
     match = re.match(
@@ -224,10 +400,11 @@ def _validate_show_sql(masked_sql: str, allowed_tables: set[str]) -> None:
         compact,
     )
     if match:
-        _validate_known_table(match.group(1), allowed_tables)
+        if allowed_tables is not None:
+            _validate_known_table(match.group(1), allowed_tables)
         return
 
-    raise RuntimeError("SHOW 仅允许 TABLES 或 COLUMNS/FIELDS 元数据查询")
+    raise RuntimeError("SHOW 仅允许 TABLES、COLUMNS/FIELDS 或白名单表的 INDEX 元数据查询")
 
 
 def _extract_table_references(masked_sql: str) -> list[str]:
@@ -289,8 +466,6 @@ def _mask_string_literals(sql: str) -> str:
 
     return "".join(chars)
 
-
-# ---- 性能门禁 ----
 
 PERF_GATE_DEFAULTS: dict = {
     "mode": "enforce",

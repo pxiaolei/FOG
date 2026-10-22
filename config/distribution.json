@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "FOG",
+  "repository": "pxiaolei/FOG",
+  "branch": "main",
+  "skills": [
+    "lx-biaogetongbu",
+    "lx-feishudocs",
+    "lx-haibao",
+    "lx-init",
+    "lx-nongfu",
+    "lx-tongzhi",
+    "lx-update",
+    "lx-zhutichaibiao",
+    "lx_shujuku",
+    "lxx_share"
+  ],
+  "runtime": ".workbuddy/skills/lx-haibao/.venv"
+}

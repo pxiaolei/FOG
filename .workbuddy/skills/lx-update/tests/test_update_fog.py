@@ -27,6 +27,14 @@ def git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProces
 
 
 class FogUpdateSafetyTests(unittest.TestCase):
+    def test_existing_fog_brand_files_and_partner_custom_assets_keep_their_boundaries(self):
+        path = ".workbuddy/skills/lx-haibao/brand-assets/example/logo.png"
+        with patch.object(update_fog, "OFFICIAL_REPOSITORY", "pxiaolei/FOG"):
+            self.assertFalse(update_fog.is_protected_path(path))
+        with patch.object(update_fog, "OFFICIAL_REPOSITORY", "pxiaolei/lxworkspace"):
+            self.assertTrue(update_fog.is_protected_path(path))
+            self.assertFalse(update_fog.is_protected_path(path, {path: "fixture"}))
+
     def test_skill_contract_explicitly_promises_token_and_api_key_preservation(self):
         skill_text = (SCRIPT.parents[1] / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("token", skill_text)
@@ -52,7 +60,7 @@ class FogUpdateSafetyTests(unittest.TestCase):
     def write_base_files(self):
         (self.publisher / ".gitignore").write_text(
             "\n".join(
-                [
+                sorted(update_fog.REQUIRED_IGNORE_RULES) + [
                     ".env*",
                     "!.env.example",
                     "config/fog_config.yaml",
@@ -172,6 +180,19 @@ class FogUpdateSafetyTests(unittest.TestCase):
             plan = update_fog.build_plan(self.colleague)
         self.assertTrue(any("包含未授权删除" in blocker for blocker in plan.blockers))
 
+    def test_remote_cannot_rebind_workspace_identity(self):
+        import json
+        config = self.publisher / "config"
+        config.mkdir()
+        other = "pxiaolei/FOG" if update_fog.OFFICIAL_REPOSITORY == "pxiaolei/lxworkspace" else "pxiaolei/lxworkspace"
+        (config / "distribution.json").write_text(json.dumps({"repository": other}))
+        self.commit_and_push("invalid workspace identity")
+        before = self.repository_snapshot()
+        with self.official_origin_allowed():
+            plan = update_fog.build_plan(self.colleague)
+        self.assertTrue(any("身份" in value for value in plan.blockers))
+        self.assertEqual(self.repository_snapshot(), before)
+
     def test_allowlisted_retired_skill_deletion_can_be_confirmed_without_touching_config(self):
         git(self.publisher, "rm", "-r", ".workbuddy/skills/lx-zhoubao")
         expected = self.commit_and_push("retire shared skill")
@@ -187,6 +208,11 @@ class FogUpdateSafetyTests(unittest.TestCase):
 
         with self.official_origin_allowed():
             plan = update_fog.build_plan(self.colleague)
+            if update_fog.OFFICIAL_REPOSITORY == "pxiaolei/lxworkspace":
+                self.assertTrue(any("未授权删除" in value for value in plan.blockers))
+                self.assertEqual(before, config.read_bytes())
+                self.assertTrue((self.colleague / ".workbuddy/skills/lx-zhoubao").exists())
+                return
             self.assertFalse(plan.blockers)
             self.assertEqual(
                 0,

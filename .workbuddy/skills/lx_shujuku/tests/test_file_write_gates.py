@@ -1,7 +1,9 @@
+import io
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -54,8 +56,54 @@ class FakeClient:
         self.export_calls += 1
         return REMOTE_SCHEMA
 
+    def show_indexes(self, table):
+        return [
+            {
+                "table": table,
+                "unique": False,
+                "key_name": "idx_brand_date",
+                "seq_in_index": 1,
+                "column_name": "brand_name",
+                "collation": "A",
+                "cardinality": 100,
+                "sub_part": None,
+                "packed": None,
+                "nullable": True,
+                "index_type": "BTREE",
+                "comment": "",
+                "index_comment": "",
+                "visible": True,
+                "expression": None,
+            }
+        ]
+
 
 class OutputGateTests(unittest.TestCase):
+    def test_indexes_cli_returns_structured_metadata(self):
+        client = FakeClient()
+        stdout = io.StringIO()
+        with patch.object(db_tools, "create_client", return_value=client), redirect_stdout(stdout):
+            try:
+                result = db_tools.main(["indexes", "honghu_order_data", "--json"])
+            except SystemExit as exc:
+                result = int(exc.code)
+
+        self.assertEqual(result, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["type"], "lx_shujuku.index_metadata")
+        self.assertEqual(payload["database"], "dataReporting")
+        self.assertEqual(payload["table"], "honghu_order_data")
+        self.assertEqual(payload["indexes"][0]["column_name"], "brand_name")
+
+    def test_indexes_cli_has_no_whitelist_bypass(self):
+        stderr = io.StringIO()
+        with patch.object(db_tools, "create_client") as create_client, redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as caught:
+                db_tools.main(["indexes", "unknown_table", "--no-whitelist"])
+
+        self.assertEqual(caught.exception.code, 2)
+        create_client.assert_not_called()
+
     def test_query_existing_output_is_rejected_before_client_call(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "query.json"

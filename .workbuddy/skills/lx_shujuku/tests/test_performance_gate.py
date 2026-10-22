@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
+from lx_shujuku.client import DataReportingClient
 
 from lx_shujuku.query_policy import (
     check_performance_gates,
@@ -14,6 +16,25 @@ from lx_shujuku.query_policy import (
 CFG = load_perf_gate_config()
 
 
+class CentralPerformanceGateTests(unittest.TestCase):
+    def test_bad_explain_stops_before_the_real_query(self):
+        client = object.__new__(DataReportingClient)
+        sql = "SELECT brand_name, SUM(gmv) FROM honghu_detail_data WHERE date_day='2026-10-01' GROUP BY brand_name"
+        with patch.object(client, "prepare_sql", return_value=sql), patch.object(client, "_execute_prepared_sql", return_value=[{"table": "honghu_detail_data", "type": "ALL", "key": None, "rows": 200000}]) as execute:
+            with self.assertRaisesRegex(RuntimeError, "性能门禁"):
+                client.execute(sql)
+            self.assertEqual(execute.call_count, 1)
+            self.assertTrue(execute.call_args.args[0].startswith("EXPLAIN "))
+
+    def test_missing_explain_stops_before_the_real_query(self):
+        client = object.__new__(DataReportingClient)
+        sql = "SELECT brand_name, SUM(gmv) FROM honghu_detail_data WHERE date_day='2026-10-01' GROUP BY brand_name"
+        with patch.object(client, "prepare_sql", return_value=sql), patch.object(client, "_execute_prepared_sql", side_effect=RuntimeError("fixture no plan")) as execute:
+            with self.assertRaisesRegex(RuntimeError, "无法取得执行计划"):
+                client.execute(sql)
+            self.assertEqual(execute.call_count, 1)
+
+
 def violations(sql: str) -> list[str]:
     return check_performance_gates(sql, CFG)
 
@@ -21,7 +42,7 @@ def violations(sql: str) -> list[str]:
 class TestRequireWhere(unittest.TestCase):
     def test_missing_where_is_blocked(self):
         self.assertTrue(
-            any("性能门禁 1" in v for v in violations("SELECT brand_name FROM operator_brand"))
+            any("性能门禁 1" in v for v in violations("SELECT brand_name FROM honghu_detail_data"))
         )
 
     def test_with_where_passes(self):
@@ -153,8 +174,10 @@ class TestConfigFallback(unittest.TestCase):
     def test_default_mode_is_enforce(self):
         self.assertEqual(CFG["mode"], "enforce")
 
-    def test_no_where_exempt_tables_by_default(self):
-        self.assertEqual(CFG["where_exempt_tables"], [])
+    def test_only_operator_brand_mapping_has_explicit_full_read_exception(self):
+        self.assertEqual(CFG["where_exempt_tables"], ["operator_brand"])
+        self.assertEqual(violations("SELECT brand_name FROM operator_brand"), [])
+        self.assertTrue(violations("SELECT brand_name FROM honghu_detail_data"))
 
 
 if __name__ == "__main__":

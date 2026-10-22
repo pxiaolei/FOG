@@ -4,6 +4,7 @@ lx_shujuku CLI 命令行工具
 用法：
   "$WB_PYTHON" db_tools.py list-tables         列出所有表
   "$WB_PYTHON" db_tools.py describe <table>     查看表结构
+  "$WB_PYTHON" db_tools.py indexes <table>      查看白名单表索引
   "$WB_PYTHON" db_tools.py catalog             全量表结构概览
   "$WB_PYTHON" db_tools.py query "<sql>"        执行 SQL 查询
   "$WB_PYTHON" db_tools.py count <table>        查询记录数
@@ -12,15 +13,13 @@ lx_shujuku CLI 命令行工具
   "$WB_PYTHON" db_tools.py operator-brands      查询运营主体-品牌-城市码表
 
 常用业务查询模板：
-  "$WB_PYTHON" db_tools.py template activity-by-operator --operator "方舟行（上海）"
   "$WB_PYTHON" db_tools.py template capacity-by-brand --brand "方舟行车主" --date "2025-05-12"
   "$WB_PYTHON" db_tools.py template order-by-brand --brand "方舟行车主" --date "2025-05-12"
   "$WB_PYTHON" db_tools.py template time-split --brand "方舟行车主" --date "2025-05-12"
-  "$WB_PYTHON" db_tools.py template coupon --product "工作日流水飞涨"
   "$WB_PYTHON" db_tools.py template operator-brands --operator "方舟行（上海）"
   "$WB_PYTHON" db_tools.py template driver-rt --tenant "方舟行（上海）" --date "2025-05-12"
   "$WB_PYTHON" db_tools.py template order-rt --tenant "方舟行（上海）" --date "2025-05-12"
-  "$WB_PYTHON" db_tools.py template tr-config --brand "方舟行车主"
+  "$WB_PYTHON" db_tools.py template tr-config --date "2025-05-12" --brand "方舟行车主"
 """
 
 import argparse
@@ -101,6 +100,44 @@ def cmd_describe(client: DataReportingClient, table: str, no_whitelist: bool = F
         )
 
 
+def cmd_indexes(
+    client: DataReportingClient,
+    table: str,
+    json_output: bool = False,
+) -> None:
+    """查看白名单表索引元数据。"""
+    indexes = client.show_indexes(table)
+    payload = {
+        "type": "lx_shujuku.index_metadata",
+        "version": 1,
+        "database": "dataReporting",
+        "table": table,
+        "queried_at": datetime.now(timezone.utc).isoformat(),
+        "index_row_count": len(indexes),
+        "indexes": indexes,
+    }
+    if json_output:
+        print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        return
+
+    print(f"\n表: {table}（{len(indexes)} 条索引字段记录）")
+    if not indexes:
+        print("  （未返回索引元数据）")
+        return
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in indexes:
+        grouped.setdefault(str(item["key_name"]), []).append(item)
+    for key_name, items in grouped.items():
+        first = items[0]
+        uniqueness = "唯一" if first["unique"] else "非唯一"
+        index_type = first["index_type"] or "未知类型"
+        print(f"  {key_name}（{uniqueness}，{index_type}）")
+        for item in items:
+            column = item["column_name"] or item["expression"] or "（未知）"
+            print(f"    {item['seq_in_index']}. {column}")
+
+
 def cmd_query(
     client: DataReportingClient,
     sql: str,
@@ -116,7 +153,6 @@ def cmd_query(
     max_rows: int = 10000,
     overwrite: bool = False,
     confirmed: bool = False,
-    allow_full_scan: bool = False,
 ) -> None:
     """执行 SQL 查询并明确标注结果完整性。"""
     if full and not (json_output or output or audit):
@@ -141,7 +177,6 @@ def cmd_query(
             metric=metric,
             enforce_table_whitelist=not no_whitelist,
             default_limit=limit,
-            allow_full_scan=allow_full_scan,
         )
     rows = package["rows"]
     if output or audit:
@@ -406,24 +441,14 @@ def cmd_template(client: DataReportingClient, args: argparse.Namespace) -> None:
         kwargs["limit"] = args.limit
 
     templates = {
-        "activity-by-operator": client.query_activity_by_operator,
         "capacity-by-brand": client.query_capacity_by_brand_date,
         "order-by-brand": client.query_order_by_brand_date,
         "time-split": client.query_time_split_by_hour,
-        "coupon": client.query_coupon_by_product,
         "operator-brands": lambda **kw: client.query_operator_brands(kw.get("operator", "")),
         "driver-rt": client.query_driver_real_time,
         "order-rt": client.query_order_real_time,
         "tr-config": lambda **kw: client.query_tr_config(
-            brand=kw.get("brand", ""), city=kw.get("city", "")
-        ),
-        "activity-by-brand": lambda **kw: client.query_by_brand_date(
-            "activity_data", kw.get("brand", ""), kw.get("date", ""),
-            limit=kw.get("limit", 50),
-        ),
-        "card-by-brand": lambda **kw: client.query_by_brand_date(
-            "card_data", kw.get("brand", ""), kw.get("date", ""),
-            limit=kw.get("limit", 50),
+            date=kw.get("date", ""), brand=kw.get("brand", ""), city=kw.get("city", "")
         ),
     }
 
@@ -551,15 +576,14 @@ def main(argv: Optional[list[str]] = None) -> int:
   %(prog)s list-tables
   %(prog)s describe card_data
   %(prog)s catalog
-  %(prog)s query "SELECT * FROM activity_data LIMIT 5"
-  %(prog)s query "SELECT * FROM new_table LIMIT 5" --no-whitelist
+  %(prog)s query "SELECT id, brand_name, date_day, city_name, completed_order_count FROM honghu_order_data WHERE brand_name = '品牌A' AND date_day = '2026-08-01' LIMIT 5"
+  %(prog)s query "SELECT 1 FROM new_table LIMIT 1" --no-whitelist
   %(prog)s describe new_table --no-whitelist
-  %(prog)s count activity_data
+  %(prog)s count honghu_order_data --where "brand_name = '品牌A' AND date_day = '2026-08-01'"
   %(prog)s schema
   %(prog)s health
   %(prog)s operator-brands --operator "方舟行（上海）"
   %(prog)s mabiao
-  %(prog)s template activity-by-operator --operator "方舟行（上海）"
   %(prog)s template capacity-by-brand --brand "方舟行车主" --date "2025-05-12"
         """,
 
@@ -583,6 +607,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="绕过本地 schema 白名单，直接查看线上表结构",
     )
 
+    # indexes
+    indexes_parser = subparsers.add_parser("indexes", help="查看白名单表索引元数据")
+    indexes_parser.add_argument("table", help="表名（必须在本地 schema 白名单中）")
+    indexes_parser.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="输出结构化 JSON",
+    )
+
     # catalog
     subparsers.add_parser("catalog", aliases=["cat"], help="全量表结构概览")
 
@@ -593,7 +627,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     query_parser.add_argument(
         "--full",
         action="store_true",
-        help="完整结果模式：稳定排序后双遍分页，并用前后计数和哈希验收",
+        help="有界完整模式：最多 20 页，单遍稳定游标读取并用前后计数验收",
     )
     query_parser.add_argument("--page-size", type=int, default=500, help="完整模式分页大小（默认 500）")
     query_parser.add_argument("--max-rows", type=int, default=10000, help="完整模式最大总行数（默认 10000）")
@@ -608,11 +642,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--no-whitelist",
         action="store_true",
         help="绕过本地 schema 白名单，允许查询尚未同步的新分享表",
-    )
-    query_parser.add_argument(
-        "--allow-full-scan",
-        action="store_true",
-        help="显式豁免公司库性能门禁（仅本次），并写入豁免记录",
     )
 
     # count
@@ -714,6 +743,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             cmd_list_tables(client)
         elif args.command in ("describe", "desc"):
             cmd_describe(client, args.table, no_whitelist=getattr(args, "no_whitelist", False))
+        elif args.command == "indexes":
+            cmd_indexes(client, args.table, json_output=args.json_output)
         elif args.command in ("catalog", "cat"):
             cmd_catalog(client)
         elif args.command in ("query", "q"):
@@ -732,7 +763,6 @@ def main(argv: Optional[list[str]] = None) -> int:
                 max_rows=args.max_rows,
                 overwrite=args.overwrite,
                 confirmed=args.confirmed,
-                allow_full_scan=getattr(args, "allow_full_scan", False),
             )
         elif args.command == "count":
             cmd_count(

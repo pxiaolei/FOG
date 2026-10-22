@@ -294,12 +294,17 @@ def _filter_operator_brand_rows_by_person(
         if person:
             zhuti_to_person[operator].add(person)
 
-        filtered_rows.append({
+        row_payload = {
             "operator": operator,
             "brand": brand,
             "city": city,
             "contact_person": person,
-        })
+        }
+        if "is_opening" in row:
+            row_payload["is_opening"] = _clean_mapping_value(row.get("is_opening"))
+        if "open_city_date" in row:
+            row_payload["open_city_date"] = _clean_mapping_value(row.get("open_city_date"))
+        filtered_rows.append(row_payload)
 
     return {
         "city_to_zhuti": {k: sorted(v) for k, v in city_to_zhuti.items()},

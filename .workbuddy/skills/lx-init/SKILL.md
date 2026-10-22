@@ -1,64 +1,105 @@
 ---
 name: lx-init
-description: FOG 旧初始化兼容 Skill。仅当用户明确提到 lx-init、FOG 初始化、初始化 FOG 或检查配置等旧入口时使用；新用户优先使用 tools/fog.py，本 Skill 只保留旧命令兼容。
+description: "工作区初始化：确认目录，缺则直接补齐 Python/Node/Git，安装项目依赖，并用表单写入本机账号配置。仅在用户明确要求初始化、安装工作区或 lx-init 时使用。"
 ---
 
-# lx-init — 兼容入口
+# 初始化工作区
 
-## 定位
+同一套初始化用于 FOG、lxworkspace 及源工作区；读取随仓 `config/distribution.json` 的能力清单，路径不得根据文件夹名字猜测。只准备当前工作区已分发的能力。
 
-新初始化入口是项目根目录的普通工具：
+## 目标流程（必须按序，未跑完不算完成）
 
-```bash
-python tools/fog.py init                  # 默认 preview
-python tools/fog.py init --confirmed      # 创建配置与 workspace
-python tools/fog.py check
-python tools/fog.py migrate-config        # 默认 preview
-python tools/fog.py migrate-config --confirmed
-```
+### 1. 目录确认（要选项）
 
-所有 Skill 如需配置，直接读取：
+- 默认路径：Windows `D:\Work\lxworkspace`；Mac `~/Documents/Work/lxworkspace`。
+- 用选项确认：当前工作区是否为用户选定目标；若安装提示词阶段已选过路径，这里核对一致即可。
+- 不一致：停住，请用户重指工作区；不自动改到别的盘乱建。
 
-```text
-config/fog_config.yaml
-```
+### 2. 必备软件（不问，缺了直接补）
 
-`lx-init` 不再生成 `.workbuddy/skills/*/assets/config.yaml`。旧 `assets/config.yaml` 文件不再作为运行入口。
+检查这三样：
 
-## 兼容命令
+- Python >= 3.10
+- Node.js
+- Git
 
-```bash
-python .workbuddy/skills/lx-init/scripts/config_wizard.py check
-python .workbuddy/skills/lx-init/scripts/config_wizard.py init-workspace --confirmed
-python .workbuddy/skills/lx-init/scripts/config_wizard.py write-configs --dry-run
-python .workbuddy/skills/lx-init/scripts/config_wizard.py apply --confirmed
-# 已存在的初始化报告仅在显式确认覆盖时更新：
-python .workbuddy/skills/lx-init/scripts/config_wizard.py apply --confirmed --overwrite
-```
+规则（用户已定 B2）：
 
-其中 `write-configs` 只输出跳过说明，不再写 per-Skill 配置。共享 Skill 读取 `config/fog_config.yaml`；内部不分享 Skill 的个人配置放在 `config/personal_config.yaml`。
+- 缺了由 Agent **直接安装补上**，尽量不要再弹窗询问。
+- 只装这三样，不装其它系统软件。
+- 优先用系统包管理（Windows：`winget`；Mac：用户已有 Homebrew 则用 brew，否则用官方安装包途径并在结果里说明）。
+- 需要系统权限弹窗时，让用户在系统对话框里点允许；那是系统行为，不是本 Skill 的「再问要不要装」。
+- 装完立刻重检；仍失败则人话说明原因并停止后续步骤。
+- **最终汇报必须列出**：本来就有的 / 本次新装的。
 
-## 安全规则
+命令（默认会补齐缺失项，不要先只做检查来代替安装）：
 
-- 不读取、删除或覆盖 `workspace/` 下的业务文件
-- 不写入真实 token、账号或 API Key 到任何可提交文件
-- 配置缺失时只报告缺项，不生成假数据
-- `init-workspace` 和 `apply` 默认只 preview，不创建目录、`.gitkeep` 或初始化报告；真实落盘必须追加 `--confirmed`，且不能与 `--dry-run` 同时使用。`apply` 的报告路径必须位于项目内；报告已存在时还必须追加 `--overwrite`，并在创建 workspace 前先阻断未授权覆盖。
+`python tools/run_skill.py init-runtime`
+
+只读查看计划、不安装时用 `python tools/run_skill.py init-runtime --check-only`。结果是 JSON，字段为 `present`、`newly_installed`、`failed`。安装器的原始输出不回显。
+
+对人话术示例：「电脑里跑工作区需要的三样软件已经齐了；其中 Node 是刚帮你装上的。」
+
+### 3. 项目依赖（不弹窗）
+
+- 入口仍为：`python tools/run_skill.py init` 预览 → 环境与 hash 通过后执行
+  `python tools/run_skill.py init --install --confirmed --expected-preview-hash <HASH>`。
+- 只装项目内虚拟环境依赖（海报/卡券/端内图等），不弹 ask-user-question。Agent 自己读预览里的 `preview_hash` 填进命令，不要再问用户一次。
+- 不另建第二套虚拟环境；端内图复用现有图片配置键。
+- 装完一句话结果 + 独立 import 检查。
+
+### 4. 本机配置（要表单）
+
+仅展示已启用能力的字段；没有问答配置示例的工作区不要求问答 token。同事侧飞书等额外配置继续通过本仓配置示例与 `python tools/fog.py check` 核对，不把基础三项就绪当成全部集成已验收。
+
+收集并写入（值由我方线下提前发给用户，用户对着表单填）：
+
+| 表单字段 | 写入位置 |
+| --- | --- |
+| 公司库账号、密码 | `config/fog_config.yaml` → `lx_shujuku.api.username` / `password` |
+| 图片 Key | 同文件 → `lx_haibao.image_api.kie.api_key` |
+| 问答 token | `config/lx-wenda.json` → `token` |
+
+规则：
+
+- 正式文件已存在：**不覆盖已有非空内容**。只报告已存在、是否缺字段；空着的必填项可以补上，非空账号、密码、Key、token 保持原样。
+- 不存在：从对应 `.example` 复制出正式文件再写入表单值。
+- 表单先落到一个工作区外的临时文件，再运行 `python tools/run_skill.py init-config --from-json <表单.json>`，或 `--env-file <表单.env>`。JSON 键为 `username`、`password`、`image_key`、`wenda_token`。不要把值写进命令参数。
+- **禁止**把密码、Key、token 写入聊天、日志、命令行回显、Git；脚本最多打印「已写入 / 仍缺哪一项」。
+- 不修改系统级 MCP。
+
+### 完成标准
+
+同时满足才可称「初始化完成（已安装）」：
+
+1. 工作区路径正确
+2. 三样必备软件检查通过（含本轮新装说明）
+3. 项目依赖安装并通过读回检查
+4. 本机配置：已写入或确认已存在且必填项齐全
+
+「真实服务已验收」另论：不因初始化完成而宣称公司库/问答真实联调已通过。
+
+## 旧命令兼容
+
+`python tools/fog.py init/check/migrate-config` 与 `scripts/config_wizard.py` 保留既有预览、确认和备份约束；不再创建 per-Skill 真实配置。新安装使用上面的统一向导。真实配置迁移仍须另行授权。
 
 ## 执行契约
 
 ### 输入
 
-- 用户明确要求的旧初始化/检查动作和当前项目根目录。
-- 现有 `config/fog_config.yaml`、`config/personal_config.yaml` 与 workspace 状态。
+- 用户明确要求初始化/安装工作区；当前 WorkBuddy 工作区根目录。
+- 目录选项结果；配置表单结果（仅用于本机落盘）。
+- 安装项目依赖时的 `expected-preview-hash`。
 
 ### 输出
 
-- 兼容命令对应的检查结果、缺失配置项和可执行的新入口命令。
-- 不生成真实凭证，不覆盖业务目录。
+- 人话进度与最终汇总：路径、新装软件清单、项目依赖结果、配置就绪情况。
+- 终端/脚本：检查与安装结果；配置写入成功与否（无密钥明文）。
 
 ### 验收
 
-- `tools/fog.py init` 和 `migrate-config` 默认只 preview；创建目录、创建配置或备份并更新配置都必须显式 `--confirmed`。配置迁移使用不覆盖既有备份的序号路径并写后读回；读回不一致时恢复本次备份。
-- `tools/fog.py check` 能明确区分已配置、缺失和不可访问项。
-- 初始化不删除或覆盖 `workspace/`，且任何配置写入都不包含占位假密钥。
+- 目录错误时零安装、零配置写入。
+- 必备软件：缺则直接补；最终汇总含新装项；失败则停止后续。
+- 项目依赖：无弹窗；未确认 hash 前（脚本层）不安装；确认后只改项目虚拟环境。
+- 配置：无正式文件才创建；已有不覆盖非空凭据；全程无密钥回显。
+- 不覆盖、不删除用户业务文件；不装本契约以外的系统软件。

@@ -24,6 +24,8 @@ class FilterByPersonTests(unittest.TestCase):
                     "brand": "幸福千万家",
                     "city": "福州市",
                     "contact_person": "雷维亮",
+                    "is_opening": "1",
+                    "open_city_date": "2026-09-01",
                 },
                 {
                     "operator": "幸福千万家",
@@ -62,6 +64,8 @@ class FilterByPersonTests(unittest.TestCase):
                 "brand": "幸福千万家",
                 "city": "福州市",
                 "contact_person": "雷维亮",
+                "is_opening": "1",
+                "open_city_date": "2026-09-01",
             }
         ])
 

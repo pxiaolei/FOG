@@ -1,11 +1,15 @@
 ---
 name: lx-haibao
-description: 企业版 WorkBuddy 专用司机活动海报生成。用于从城市活动 TXT 生成已配置品牌的司机活动海报；按 check、dry-run、confirmed sample/full generation 执行；自动按 TXT 文件名识别品牌；同事共享默认只使用 KIE 图片 Provider；默认 hybrid 模式把模板图和真实 Logo 传给模型生成海报主体，再由脚本贴入真实二维码并逐张验证。
+description: 司机活动海报生成。用于从城市活动 TXT 生成已配置品牌的司机活动海报；按 check、dry-run、confirmed sample/full generation 执行；自动按 TXT 文件名识别品牌；共享工作区默认只使用 KIE 图片 Provider；默认 hybrid 模式把模板图和真实 Logo 传给模型生成海报主体，再由脚本贴入真实二维码并逐张验证。
 ---
 
 # lx-haibao
 
 从城市活动 TXT 生成端外司机活动海报。只使用真实 TXT、品牌配置、模板图、Logo 和二维码素材；不要编造城市、日期、金额、奖励、文件路径或验证结果。
+
+只有品牌和城市时，先让用户提供活动文字，不从公司库获取活动文案。公开预设品牌、Logo、二维码随工作区交付，无需用户重复添加；范围见随仓品牌清单，个人自定义素材受保护。公共 helper 仅负责配置与路径读取，不代替业务取数。
+
+工作区统一入口：`python tools/run_skill.py poster --dry-run --file <TXT>`。安装与依赖检查统一使用 `$lx-init`；端内图和海报共用现有海报 `.venv`，不新建端内图环境。下述 Skill 内入口保留兼容。
 
 ## 快速流程
 
@@ -18,7 +22,8 @@ cd .workbuddy/skills/lx-haibao
 首次或依赖异常时安装运行环境：
 
 ```bash
-./check_runtime.sh --install --confirmed
+./check_runtime.sh
+./check_runtime.sh --install --confirmed --expected-preview-hash <HASH>
 ```
 
 每次生成前先检查：

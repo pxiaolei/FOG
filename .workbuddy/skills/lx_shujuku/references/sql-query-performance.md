@@ -7,9 +7,11 @@
 1. 先运行 `schema-diff`，确认本地 `assets/schema.json` 与线上没有未解释漂移。
 2. 从 `assets/schema.json` 或 `references/table_catalog.md` 核对真实字段名和类型，不凭历史提示词猜字段。
 3. `schema.json` 的字段级 `PRI/MUL` 只能说明字段出现在某类键中，不能还原索引名、完整列顺序、选择性或优化器是否会采用该索引。
-4. 只有普通 `EXPLAIN` 显示实际 `key` 后，才能描述本次计划使用了哪个索引。需要完整 `SHOW INDEX` 证据而当前接口不支持时，明确标记“待技术/DBA核验”，不得补写索引清单。
+4. 只有普通 `EXPLAIN` 显示实际 `key` 后，才能描述本次计划使用了哪个索引。完整索引列顺序只通过 `db_tools.py indexes <白名单表> --json` 固定入口读取；服务端拒绝时明确标记“待技术/DBA核验”，不得改扫 `information_schema` 或补写索引清单。
 
 ## 2. 强制生成规则
+
+以下可静态判断的规则由 `lx_shujuku` 中央入口在发送 SQL 前强制执行：禁止 `SELECT *`、无业务范围的事实表查询、`WHERE 1=1`、谓词列函数/`COLLATE`/算术表达式、前导通配 `LIKE`，以及报表日期字段的 `<=`/`BETWEEN` 闭区间。`--no-whitelist` 只跳过本地表白名单，不能绕过这些性能门禁。
 
 - 连接和过滤优先使用裸字段直接比较。候选字段上不得使用 `TRIM`、`CAST`、`CONVERT`、`COLLATE`、`UPPER`、`LOWER`、`YEAR`、`MONTH`、`DATE` 或算术表达式来临时兼容数据。
 - JOIN 两侧先核对字段类型、字符集和排序规则。若不兼容，停止并报告 schema/数据质量问题，不生成带函数转换的生产 SQL。
@@ -17,7 +19,7 @@
 - 大表或行数未知的事实表必须带有能缩小业务范围的 `WHERE`。优先使用时间范围，再按问题添加品牌、城市等过滤；不能只写 `WHERE 1 = 1`。
 - 日期范围优先使用半开区间，例如 `date_day >= '2026-07-01' AND date_day < '2026-08-01'`。对 `varchar` 日期字段，先确认线上值统一为 `YYYY-MM-DD` 等可按字典序比较的格式。
 - 只选择任务需要的列，避免 `SELECT *`。普通样例或 Top N 使用合理 `LIMIT`；`LIMIT` 不能替代选择性过滤，也不能证明没有全表扫描。
-- 用户要求全部、完整或准确导出时，SQL 不写顶层 `LIMIT`，改走 `query --full` 的计数、稳定唯一排序、双遍分页和 hash 验证。
+- 用户要求全部、完整或准确导出时，SQL 不写顶层 `LIMIT`，改走 `query --full` 的前后计数、稳定唯一排序、单遍 keyset 游标、行数和 hash 验证。
 - 聚合结果中的非聚合输出字段必须进入 `GROUP BY`；`MAX()`、`COUNT()` 等单值聚合无需强行分组。
 - `COUNT(*)` 只用于统计源行数。完单量等可加总业务指标必须按 `references/metrics_catalog.json` 使用相应 `SUM(...)` 口径并运行交叉验证。
 - 不主动生成 `FORCE INDEX`、索引 DDL、`ANALYZE TABLE` 或其他可能改变生产状态的语句。
@@ -52,3 +54,7 @@
 - [ ] 日期条件使用范围比较，字符串日期格式已确认。
 - [ ] 指标聚合来自 metrics catalog，未用 `COUNT(*)` 冒充业务量。
 - [ ] 大表 JOIN/聚合已通过普通 `EXPLAIN` 门禁，或已停止并升级给技术/DBA。
+
+## 统一分发实现
+
+公司库中央入口同时保留严格 SQL 形态检查、审计式完整分页和 FOG 执行前性能检查。JOIN/GROUP BY 查询先普通 EXPLAIN；未知或不可接受的计划阻断。operator_brand 码表保持明确的只读全量例外，不扩展到事实表。旧 FOG 的 allow-full-scan 临时豁免不绕过中央只读/范围校验；需要例外先交维护者核对。

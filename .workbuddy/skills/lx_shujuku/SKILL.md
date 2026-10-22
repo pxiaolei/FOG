@@ -1,6 +1,6 @@
 ---
 name: lx_shujuku
-description: 出行数据报表平台（dataReporting）公司数据库只读访问工具，提供只读 SQL、完整结果双遍分页验证、结构化证据包、表结构浏览、operator_brand 码表和业务查询模板。当用户要求查询公司数据库、dataReporting、宏鹄活动/运力/订单/卡券/详情、接起率或 TR 值时使用；不用于本地 RDS 查询或写库。
+description: 出行数据报表平台（dataReporting）公司数据库只读访问工具，提供只读 SQL、有界单遍游标分页、结构化证据包、表结构与白名单表索引元数据浏览、operator_brand 码表和业务查询模板。当用户要求查询公司数据库、dataReporting、宏鹄活动/运力/订单/卡券/详情、接起率或 TR 值时使用；不用于本地 RDS 查询或写库。
 ---
 
 # lx_shujuku — 出行数据报表平台只读访问
@@ -11,7 +11,7 @@ description: 出行数据报表平台（dataReporting）公司数据库只读访
 
 1. **自动登录鉴权**：通过 `/dataReporting/user/login` 获取 Token，缓存复用
 2. **当前 22 张业务表覆盖**：活动、免佣卡、运力、订单、卡券、详情汇总、分时明细、接起率、TR配置、毛利、对账、数据校验、传输统计、新渠道、特惠联盟等
-3. **表结构浏览**：`describe <table>` 查看任意表的字段、类型、注释
+3. **表结构与索引元数据浏览**：`describe <table>` 查看字段、类型、注释；`indexes <table>` 只查看白名单表的当前完整索引列顺序
 4. **只读 SQL 查询**：代码层强制只允许 `SELECT` / `SHOW` / `DESCRIBE` / `EXPLAIN`
 5. **operator_brand 码表接口**：提供品牌、城市、运营主体、对接人的稳定映射
 6. **业务查询模板**：预置常用查询（按品牌/城市/日期筛选、多表关联等）
@@ -67,9 +67,12 @@ description: 出行数据报表平台（dataReporting）公司数据库只读访
 如果临时需要查询一张尚未刷新进白名单的新表，可先使用：
 
 ```bash
-"$WB_PYTHON" scripts/db_tools.py query "SELECT * FROM new_table LIMIT 5" --no-whitelist
 "$WB_PYTHON" scripts/db_tools.py describe new_table --no-whitelist
-"$WB_PYTHON" scripts/db_tools.py count new_table --no-whitelist
+"$WB_PYTHON" scripts/db_tools.py query "SELECT 1 FROM new_table LIMIT 1" --no-whitelist
+# 按 describe 返回的真实字段改成明确列名和业务范围后再查，例如：
+"$WB_PYTHON" scripts/db_tools.py query \
+  "SELECT id, start_time, status FROM new_table WHERE start_time >= '2026-08-01 00:00:00' AND start_time < '2026-08-02 00:00:00' LIMIT 5" \
+  --no-whitelist
 ```
 
 > `--no-whitelist` 会跳过本地 schema 白名单校验，但仍受只读 SQL 策略和公司服务端允许表列表保护；如果服务端尚未授权该表，本地无法绕过。
@@ -79,7 +82,8 @@ description: 出行数据报表平台（dataReporting）公司数据库只读访
 运行前设置 Python 入口：
 
 ```bash
-WB_PYTHON="${WORKBUDDY_PYTHON:-$HOME/.workbuddy/binaries/python/versions/3.13.12/bin/python3}"
+WB_PYTHON=python
+# Windows PowerShell 使用 python scripts/db_tools.py；工作区日常查询优先用根 tools/run_skill.py database
 ```
 
 ```bash
@@ -89,17 +93,24 @@ WB_PYTHON="${WORKBUDDY_PYTHON:-$HOME/.workbuddy/binaries/python/versions/3.13.12
 # 查看指定表结构
 "$WB_PYTHON" scripts/db_tools.py describe card_data
 
+# 查看白名单表的索引元数据；固定 SHOW INDEX，不支持绕过白名单
+"$WB_PYTHON" scripts/db_tools.py indexes honghu_capacity_data --json
+
 # 查看全部表结构概览
 "$WB_PYTHON" scripts/db_tools.py catalog
 
-# 受限查询：适合样例、Top N；命中 LIMIT 时会明确标记“可能截断”
-"$WB_PYTHON" scripts/db_tools.py query "SELECT * FROM activity_data" --limit 5
+# 受限查询：明确字段和业务范围；命中 LIMIT 时会标记“可能截断”
+"$WB_PYTHON" scripts/db_tools.py query \
+  "SELECT id, brand_name, date_day, city_name, completed_order_count FROM honghu_order_data WHERE brand_name = '品牌A' AND date_day = '2026-08-01' LIMIT 5"
 
 # 受限查询并保存结构化证据包
-"$WB_PYTHON" scripts/db_tools.py query "SELECT * FROM activity_data LIMIT 5" --audit --question "查询活动样例"
+"$WB_PYTHON" scripts/db_tools.py query \
+  "SELECT id, brand_name, date_day, city_name, completed_order_count FROM honghu_order_data WHERE brand_name = '品牌A' AND date_day = '2026-08-01' LIMIT 5" \
+  --audit --question "查询订单样例"
 
 # 显式输出目标已存在时，必须同时确认覆盖
-"$WB_PYTHON" scripts/db_tools.py query "SELECT * FROM activity_data LIMIT 5" \
+"$WB_PYTHON" scripts/db_tools.py query \
+  "SELECT id, brand_name, date_day, city_name, completed_order_count FROM honghu_order_data WHERE brand_name = '品牌A' AND date_day = '2026-08-01' LIMIT 5" \
   --output workspace/query.json --overwrite --confirmed
 
 # 完整查询：SQL 不写顶层 LIMIT，必须用可唯一定位结果行的简单字段稳定排序
@@ -119,10 +130,11 @@ WB_PYTHON="${WORKBUDDY_PYTHON:-$HOME/.workbuddy/binaries/python/versions/3.13.12
 "$WB_PYTHON" scripts/db_tools.py mabiao
 
 # 按品牌和日期查询（业务模板）
-"$WB_PYTHON" scripts/db_tools.py template activity-by-brand --brand "方舟行申程司机端" --date "2025-05-12"
+"$WB_PYTHON" scripts/db_tools.py template capacity-by-brand --brand "方舟行车主" --date "2025-05-12"
 
-# 查询某张表的记录数
-"$WB_PYTHON" scripts/db_tools.py count activity_data
+# 查询限定业务范围的记录数
+"$WB_PYTHON" scripts/db_tools.py count honghu_order_data \
+  --where "brand_name = '品牌A' AND date_day = '2026-08-01'"
 
 # 对比线上表结构和本地 schema
 "$WB_PYTHON" scripts/db_tools.py schema-diff
@@ -131,6 +143,8 @@ WB_PYTHON="${WORKBUDDY_PYTHON:-$HOME/.workbuddy/binaries/python/versions/3.13.12
 "$WB_PYTHON" scripts/db_tools.py refresh-schema
 "$WB_PYTHON" scripts/db_tools.py refresh-schema --confirmed
 ```
+
+`activity-by-operator`、`activity-by-brand`、`card-by-brand` 和仅按商品名查询卡券的旧模板已失败关闭：当前线上索引不能支持这些过滤条件，普通 `EXPLAIN` 会出现 `type=ALL/key=NULL`。需要恢复时，先由技术/DBA确认可用索引，再补模板和执行计划测试。
 
 ## 配置
 
@@ -167,8 +181,9 @@ lx_shujuku:
 "$WB_PYTHON" scripts/db_tools.py list-tables
 "$WB_PYTHON" scripts/db_tools.py describe card_data
 
-# 4. 查询样例数据；命中 LIMIT 时只能称为受限结果
-"$WB_PYTHON" scripts/db_tools.py query "SELECT * FROM operator_brand LIMIT 10"
+# 4. 查询样例数据；明确列名，命中 LIMIT 时只能称为受限结果
+"$WB_PYTHON" scripts/db_tools.py query \
+  "SELECT id, operator_entity, brand_name, city_name, contact_person FROM operator_brand ORDER BY id LIMIT 10"
 
 # 5. 查询公司库码表
 "$WB_PYTHON" scripts/db_tools.py operator-brands --limit 10
@@ -196,7 +211,7 @@ mapping = client.load_mabiao_mapping()
 查询结果分成两种模式，不能混用口径：
 
 - **受限模式**：默认自动追加顶层 `LIMIT`。适合样例和 Top N；返回行数命中上限时，`is_complete=null`、`possible_truncation=true`，不得声称“全部”。
-- **完整模式**：显式 `--full`。SQL 不得带顶层 `LIMIT`；结果超过一行时，必须使用简单字段或别名组成的顶层 `ORDER BY`，且排序字段组合必须唯一。0/1 行聚合结果不要求排序。脚本执行前后计数、两遍分页读回和结果 SHA-256 对比；任何不一致都停止，不输出为准确结果。
+- **完整模式**：显式 `--full`。SQL 不得带顶层 `LIMIT`；除小码表 `operator_brand` 外必须包含顶层 `WHERE` 业务范围。结果超过一行时，必须使用简单字段或别名组成的顶层 `ORDER BY`，且排序字段组合必须唯一。脚本先计数，最多允许 20 页，再用单遍 keyset 游标读取并执行查询后计数；行数或边界不一致即停止。0/1 行聚合结果不要求排序。
 
 完整模式必须同时使用 `--audit`、`--json` 或 `--output`，避免终端为了可读性截断长字段。业务查询示例：
 
@@ -207,7 +222,7 @@ mapping = client.load_mabiao_mapping()
   --metric brand_city_daily_completed_orders
 ```
 
-版本 2 证据包至少记录：原始问题、指标口径及目录 hash、原始/安全 SQL、执行时间、模式、返回/总行数、完整性状态、schema 快照时间及 hash、结果 SHA-256、验证方法、结果行和风险提示。默认保存到 `assets/query_runs/`，该目录已加入 `.gitignore`，不要直接分享含敏感明细的数据包。若自动生成的目标名或显式 `--output` 已存在，默认停止；只有 `--overwrite --confirmed` 才可覆盖。
+完整模式生成版本 3 证据包，至少记录：原始问题、指标口径及目录 hash、原始/安全 SQL、执行时间、模式、返回/总行数、完整性状态、schema 快照时间及 hash、结果 SHA-256、单遍游标验证方法、实际页数、页数上限、结果行和风险提示。默认保存到 `assets/query_runs/`，该目录已加入 `.gitignore`，不要直接分享含敏感明细的数据包。若自动生成的目标名或显式 `--output` 已存在，默认停止；只有 `--overwrite --confirmed` 才可覆盖。
 
 指标口径目录在：
 
@@ -243,11 +258,14 @@ references/metrics_catalog.json
 - 仅支持只读 SQL（代码层拦截写库/DDL/多语句）
 - 默认普通 SQL 查询的表名必须存在于 `assets/schema.json` 白名单；临时新表可用 `--no-whitelist` 跳过本地白名单
 - `describe` 会在本地白名单缺失时尝试读取线上结构；`count` 临时新表需显式追加 `--no-whitelist`
+- `indexes` 只接受本地 schema 白名单中的一个简单表名，内部固定生成 `SHOW INDEX FROM <table>`；没有 `--no-whitelist`，不接受数据库限定名、SQL 片段、后缀条件或多语句
 - `--no-whitelist` 不能绕过公司 dataReporting 服务端授权；服务端未加入允许查询范围的物理表仍然不可访问
 - 普通 `SELECT` 未写顶层 `LIMIT` 时会自动追加限制；字符串和子查询中的 `LIMIT` 不再误判为顶层限制
-- `--full` 最大行数默认 10000，可按任务显式调整；超过上限先缩小筛选范围，不自动输出半截结果
-- 多行完整模式要求排序字段组合唯一，并进行两遍读回；0/1 行聚合结果免排序。查询服务不提供事务快照，证据包会保留这一边界说明
-- `SHOW` 仅允许表和字段元数据查询
+- 普通查询的顶层 `OFFSET` 不能超过 10000；更深分页必须改用稳定游标或缩小范围
+- `--full` 最大行数默认 10000，可按任务显式调低或调高，但无论行数配置如何都不能超过 20 页；超过门禁先缩小日期或业务范围
+- 除 `operator_brand` 外，完整查询必须带顶层 `WHERE`；全历史和无界事实表查询失败关闭
+- 多行完整模式要求排序字段组合唯一，并进行单遍 keyset 游标读取、前后计数和行数校验；0/1 行聚合结果免排序。查询服务不提供事务快照，无法排除查询期间非排序字段原地变更，证据包会保留这一边界说明
+- `SHOW` 仅允许表、字段元数据，以及白名单表的精确 `SHOW INDEX FROM <table>` 查询
 - Token 过期时有自动刷新机制
 - 刷新 schema 前先运行 `schema-diff`；`refresh-schema` 默认只预览，只有追加 `--confirmed`（旧 `--yes` 兼容）才会写入并自动备份旧文件
 
@@ -256,6 +274,7 @@ references/metrics_catalog.json
 ### 输入
 
 - 原始业务问题、公司 dataReporting 查询对象、日期范围、筛选条件和所需粒度。
+- 查看索引时只提供本地 schema 白名单表名，不提供 SQL；服务端拒绝时停止，不改走 `information_schema`。
 - 结果模式：样例/Top N 使用受限模式；要求“全部、完整、准确导出”时使用 `--full`。
 - 涉及标准指标时提供 `--metric`，并以 `references/metrics_catalog.json` 为口径真源。
 - 可选本地证据包/schema/diff 输出目标；已有目标覆盖必须同时给出 `--overwrite --confirmed`。
@@ -263,12 +282,18 @@ references/metrics_catalog.json
 ### 输出
 
 - 实际执行的安全 SQL、查询时间、返回行数、完整性状态、结果 SHA-256 和真实结果行。
-- `--audit/--json/--output` 生成版本 2 证据包；失败、无结果、权限不足和漂移单独呈现。
+- `indexes --json` 返回数据库、表名、查询时间及按索引名和列顺序排序的唯一性、字段、基数、可空性、类型、可见性等元数据。
+- `--audit/--json/--output` 的完整模式生成版本 3 证据包；失败、无结果、权限不足和漂移单独呈现。
 
 ### 验收
 
 - 查询前 schema 与线上无未解释漂移；字段、过滤条件、粒度和聚合方式与业务问题一致。
-- 受限查询命中 LIMIT 时不得报告完整；多行完整查询必须通过唯一稳定排序、前后计数、双遍读回和哈希一致性，0/1 行聚合结果免排序但仍执行双遍与计数。
+- 索引元数据入口必须在发送前拒绝未知表和任何 `SHOW INDEX` 后缀，且没有白名单绕过参数。
+- 受限查询命中 LIMIT 时不得报告完整；深 `OFFSET` 必须在发送前拒绝；多行完整查询必须通过顶层范围、20 页上限、唯一稳定排序、单遍 keyset 游标、前后计数和行数一致性校验，0/1 行聚合结果免排序但仍执行单次读取与前后计数。
 - 标准指标实际执行 catalog 中的交叉验证 SQL，主结果与验证结果可对账后才用于报告或对外同步。
 - 新输出可直接创建；已有输出未同时确认 overwrite 时，客户端写命令为零且目标文件不变。
 - `refresh-schema` 未 confirmed 时 schema/catalog 与备份集合不变；confirmed 后两份旧文件均有备份。
+
+## 共享工作区查询入口
+
+`python tools/run_skill.py database --sql "<只读SQL>" --question "<业务问题>"` 默认预览；确认后使用同一 preview_hash。入口仅使用本工作区公司账号，完整结果经中央审计分页与读回，输出新任务目录。伙伴基础异动使用 lx-yidong，不调用私人 RDS。FOG 的性能检查已合入公共实现，原严格 SQL、唯一排序、分页校验继续有效；operator_brand 码表全量例外保留，事实表不得因此豁免。
