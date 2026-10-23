@@ -1,6 +1,6 @@
 {
   "source_repository": "p-fog",
-  "source_commit": "15091b63f6e012095f19b81549fe26403710126d",
+  "source_commit": "46d306d397c866fd12b418da7c3d236002685cb3",
   "files": {
     ".gitignore": "c6949bf8aacbe72f55e097d80979b05f216ece08be4f7c1cebe9ea0979e82198",
     ".workbuddy/skills/lx-biaogetongbu/.gitignore": "9685dd77a1e7c4e230c34c730d1d069706e10fce5f4f44ee1ab6648fa6f6fd2f",
@@ -134,8 +134,8 @@
     ".workbuddy/skills/lx-tongzhi/templates/shangjia/weixin.md": "4f94ba9510ac864bea6ee739f0fee4cf4471953a3c932219283d2e69b767aa35",
     ".workbuddy/skills/lx-tongzhi/templates/siji/duanxin.md": "2ab94542c161415b10ea8f7dbe15146529eb36d16c8e9405491134670f9df246",
     ".workbuddy/skills/lx-tongzhi/templates/siji/push.md": "d9fbd428a2f204ba37f62bb7dcb860549afbafb05e3ad594010bdc5fd115a137",
-    ".workbuddy/skills/lx-update/SKILL.md": "7896a0af70ff2c0c77b3158c0cbfe6f2834bdad1bc26c5eee4bef8db378aedb1",
-    ".workbuddy/skills/lx-update/agents/openai.yaml": "36f6a193ee74140ba13587032266e37d076847b281471fc4df8e3d6ddcae6466",
+    ".workbuddy/skills/lx-update/SKILL.md": "a85bd7bf2e7b8d1d2f42122004409e966fcc828302e3089d1b97a5f7b8ed4c06",
+    ".workbuddy/skills/lx-update/agents/openai.yaml": "efc291ca75441d3ba14fcb21cc301172599c918e42bf4e088c26ca3f28c9486d",
     ".workbuddy/skills/lx-update/scripts/update_fog.py": "45ccb11677299af768dad16b3e22fb6ec3c70e1bcc99493d46271b0de524d6d4",
     ".workbuddy/skills/lx-update/scripts/update_workspace.py": "911d838f2a7c1806d8bee45380564cc7f79ea59a5a716eb7afce0cbdb64a5b8b",
     ".workbuddy/skills/lx-update/tests/test_update_fog.py": "8f4d74f5e96c6b6c4c4b63dd139908f9b016422dc3cdffec2b141457973d40cc",
@@ -188,7 +188,7 @@
     "tools/fog.py": "23345b9a9383898c1a8fe682e967d3baa651261c5d9e92bb6b44d55140fac1ae",
     "tools/generate_skill_index.py": "7d2c50ddda7a95597e3bac986c66852a74bee481aca5e0b7883da6108afbeabb",
     "tools/lx.cmd": "ac2cc8bb5d03e3c870bf649096f40fb148a3783f7bf1d76078803e16a8e186af",
-    "tools/run_skill.py": "a28ee8003371755af5b7283ecd1de6f0486d73b54af65dcc3d8fb93ac9d86bbd",
+    "tools/run_skill.py": "6cb10163e37ce35bbdaf8b86102433b9a55ddf53339a192ebcedde2a9da8bd7a",
     "tools/windows/check.ps1": "5d3f8a62a9bb6f7988cb15b4746365abebea23a68d4f1ead132a88013a827e5f",
     "tools/windows/install.ps1": "1ccb54bf9a4e6d605fe166f882add778bc78e7427d2af9089a60eab345a22da0",
     "workspace/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
