@@ -30,9 +30,9 @@ python .workbuddy/skills/lx-update/scripts/update_fog.py check
 python .workbuddy/skills/lx-update/scripts/update_fog.py apply --confirmed <check 输出的 remote_commit>
 ```
 
-`lx-update` 不会自动 stash、reset、合并或覆盖本地配置。检测到未提交改动、分支分叉、未授权远端删除、受保护路径或本地文件冲突时会停止；固定退役清单内的 Skill 删除也会先逐文件展示，只有确认完整远端 commit 后才随 fast-forward 生效。更新后真实配置仍需按提示另行检查，不能把配置改写混进代码更新。
+`lx-update` 不自动stash、reset、合并或覆盖本机配置。先展示版本、完整commit、变化和迁移；新发布按 `config/workspace-release.json` 与新旧来源锁核验逐文件工程退役，确认后才快进。未声明删除、保护路径、额外资料、本地改动/分叉/冲突仍停止；未版本化历史发布兼容原FOG例外。每次发布递增版本，真实配置不混入代码更新。
 
-第一次 bootstrap：如果同事当前版本还没有 `lx-update`，先让 WorkBuddy 只读检查 `git status` 和 `origin/main` 差异；工作区不干净就停止，干净且仅可 fast-forward 时，再由同事确认目标 commit 后执行一次 `git fetch` + `git merge --ff-only`。首次拉到 `lx-update` 后，后续不要再使用临时提示词。
+第一次引导：旧工具不能处理迁移时，请对接人提供固定完整发布commit和该版本 `tools/bootstrap_update.py` 的SHA256；从固定commit下载到工作区外临时目录并核对hash，然后运行 `python <临时脚本> --repo <当前工作区绝对路径> --commit <40位COMMIT> check`，展示范围并确认后运行 `apply --confirmed <同一COMMIT>`。不手改旧脚本或白名单，不直接绕过检查merge；工作区身份缺失、脏改动或校验失败时停止。成功后继续使用 `/lx-update`，不重填账号。
 
 ## 2. 文件夹结构
 

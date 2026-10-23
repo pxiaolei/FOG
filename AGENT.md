@@ -88,6 +88,7 @@ python3 tools/generate_skill_index.py --check
 - 自动同步只新增或更新白名单文件，不删除本仓内容，根文档和配置示例只接收 p-fog/distribution/FOG 的对应源文件；SKILLS.md 在本仓生成，不接受私人根文档覆盖。
 - 维护者发布共享快照使用私人仓 `lx-fogshare`；同事只使用本仓 `lx-update` 从 `pxiaolei/FOG` 的 `main` 分支检查和快进更新，不直接接触私人仓。
 - `lx-update` 必须先只读检查，再绑定远端提交显式确认；本地脏改动、分支分叉、未授权远端删除、受保护路径或未追踪文件冲突一律停止，不自动 stash、reset、清理或合并。固定退役清单中的删除也必须逐文件展示后才可随已确认 commit 快进。
+- 版本与迁移按 `config/workspace-release.json` 及新旧来源锁核验；声明的逐文件工程退役还须匹配旧Git原文和新版替代hash，确认完整范围后才执行，不豁免保护路径。未版本化旧发布兼容原FOG例外。旧工具首次引导仅允许工作区外运行固定commit、SHA256核验过的 `tools/bootstrap_update.py`，先check再确认apply；不手改白名单，不重填凭据，失败保留现场不自动reset。
 - 同步前目标仓必须干净；同步前后执行敏感信息扫描、逐文件 diff 和测试。
 - 同步工具不 commit、不 push；不得用 `git add -A` 夹带同事文件。
 - 禁止分享真实配置、`.env`、业务数据、输出、缓存、日志、私人 Skill、内部迁移、个人路径和凭证。
