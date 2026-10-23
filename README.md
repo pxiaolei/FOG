@@ -15,6 +15,8 @@ LXX 出行业务运营自动化 Skill 工作区。
 - 真实配置里填写个人账号、目录、图片 API Key、飞书普通表格偏好等
 - `config/fog_config.yaml` 不进入 GitHub
 
+首次配置公司账号和图片 Key 时，运行 `python tools/run_skill.py init-config --gui` 打开本机窗口，点击“保存到本机”后写入并重新读取核对。已有非空值保持，取消不写入；未启用问答的工作区不会要求 token。窗口打不开时联系维护者，不改用记事本或聊天填写凭据。飞书等额外配置仍按对应示例单独核对。
+
 同事更新时直接对 WorkBuddy 说：
 
 ```text
