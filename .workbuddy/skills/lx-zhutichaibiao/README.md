@@ -5,8 +5,9 @@
 ## 功能
 
 - **四种拆分模式**：运营主体（品牌+城市双条件）、城市、品牌→运营主体、纯品牌
-- **样式保留**：字体、边框、填充、对齐、数字格式、列宽、合并单元格
-- **保留 sheet**：指定不拆分的 sheet 完整复制到每个输出文件
+- **样式保留**：字体、边框、填充、对齐、数字格式、列宽、表头内合并；公式或数据区合并无法正确处理时停止该文件，不静默丢失
+- **保留 sheet**：2026-10-26 用户确认本轮全部留在本地原表，不复制到交付文件；这替代旧的“完整复制到每个输出文件”行为
+- **按人交付**：完整审计码表的逐行归属、每人独立 ZIP、实际 Excel/ZIP 读回；完整源表与管理端审计不交付。纯品牌仍是维护者本地输出
 - **未匹配报告**：自动输出无法匹配的数据行及原因
 - **命令行和交互模式**：支持两种使用方式
 - **多人协作**：每个用户独立配置，配置不入 git
@@ -15,6 +16,8 @@
 
 ### 1. 安装依赖
 
+先使用项目已有环境；只有依赖确实缺失且已获得对应授权时，才在项目隔离环境中运行下方安装，禁止向系统 Python 全局安装。本次 B 实施没有安装依赖。
+
 ```bash
 pip install -r scripts/requirements.txt
 ```
@@ -22,7 +25,7 @@ pip install -r scripts/requirements.txt
 ### 2. 首次配置
 
 ```bash
-python scripts/split_by_zhuti.py --config
+python scripts/split_by_zhuti.py --config --confirmed
 ```
 
 交互式输入：
@@ -38,12 +41,17 @@ python scripts/split_by_zhuti.py --config
 <工作目录>/
 ├── 输入/       # 放入待拆分的 Excel 文件
 ├── 输出/       # 拆分结果 ZIP 输出
-└── 原表存档/     # 处理后原表自动移入
+├── 原表存档/     # 任务标识/原表；日志与独立验收通过且无残留处理范围后才归档
+└── 处理日志/     # 任务标识/Markdown，管理端本地材料
 ```
+
+每次生成 `输出/<任务标识>/`，内含 `工作文件/<接收人>/<主体>.xlsx`、`交付包/<接收人>.zip`、audit.json、ready.json，以及必要的本地未匹配报告；纯品牌使用 `本地品牌包/local-brand.zip` 并标记 local-only。时间加随机标识，目录独占创建、已有包不覆盖，失败中间文件不自动删除。
+
+只交付对应接收人的 ZIP，不发送整个输出任务目录、完整源表、所有保留 sheet、未匹配报告或审计文件。仅有 ZIP 不代表任务通过，先核对 ready.json；有 failure.json 则核清失败阶段和实际源/归档位置，禁止全量重跑。
 
 ### 4. 配置公司库码表
 
-拆表码表不再使用本地 Excel 文件，固定从 `lx_shujuku` 查询公司 dataReporting 的 `operator_brand` 表。请先确认：
+拆表码表不使用本地 Excel，固定通过 `lx_shujuku.execute_full_audited` 读取公司 dataReporting.operator_brand，再构建精确关系；排序主键来自本地 schema，分页唯一性及前后计数由既有查询器检查。缺字段/主键、查询不完整或归属缺失则停止，不回落有限条数查询或旧主体名单。以下健康检查只是连接/样例，不证明完整码表，真实读取须先遵守凭据规则并确认目标：
 
 - `config/fog_config.yaml` 的 `lx_shujuku.api` 段已填写 dataReporting 账号
 - `python .workbuddy/skills/lx_shujuku/scripts/db_tools.py health` 可以通过
@@ -51,16 +59,16 @@ python scripts/split_by_zhuti.py --config
 
 ### 5. 运行拆分
 
-**交互模式**：
+**默认只预览**：
 ```bash
 python scripts/split_by_zhuti.py
 ```
 
-会依次询问：拆分维度 → 对接人范围 → 保留 sheet
+默认只读取配置并列出输入，不查询码表、不解析工作簿、不写文件。明确当前输入、模式、接收人及文件副作用后加 `--confirmed` 执行；未给模式/接收人才进入交互，不需要重复询问已明确的信息。
 
 **命令行模式**：
 ```bash
-# 按运营主体拆，只拆雷维亮的
+# 只预览；未写 confirmed 不执行拆分
 python scripts/split_by_zhuti.py -m 1 -p 雷维亮
 
 # 按品牌拆，全部对接人
@@ -68,6 +76,9 @@ python scripts/split_by_zhuti.py -m 3 -p all
 
 # 指定保留 sheet
 python scripts/split_by_zhuti.py -m 1 -p 雷维亮 -k "沉默策略活动,策略汇总"
+
+# 经本次授权后执行；所有保留 sheet 仍仅留本地
+python scripts/split_by_zhuti.py -m 1 -p 雷维亮 -k "沉默策略活动,策略汇总" --confirmed
 ```
 
 ## 拆分模式说明
@@ -78,6 +89,12 @@ python scripts/split_by_zhuti.py -m 1 -p 雷维亮 -k "沉默策略活动,策略
 | 城市 | 2 | 城市单条件 | 运营主体文件 |
 | 品牌→运营主体 | 3 | 品牌单条件 | 运营主体文件 |
 | 纯品牌 | 4 | 品牌单条件 | 品牌文件（不映射运营主体） |
+
+模式 1 逐 sheet 必须有品牌和城市，不再静默退成单字段；模式 2/3 的已有品牌/城市字段仍约束接收范围。模式 4 输出仅本地，不能解释成按人隔离。数据输出统一 `.xlsx`，不复制 `.xlsm` 宏，不提供公式重算；遇到公式或数据区/跨表头合并时停止该文件。合成回归通过不证明真实 Excel 软件或宏可用。
+
+源行统计按原文件哈希、sheet 和原始行号区分目标、其他人过滤、真正未匹配；展开输出另算，不能按总行数凑平或对真实同值行去重。保留/隐藏/未选择 sheet、表头及空行各有排除记录。未匹配或未处理 sheet 存在时，已核清的目标包与整表未完成分别报告，源表保留。
+
+归档在产物、未匹配报告和日志完成后才尝试，同名拒绝覆盖。归档或最终收据失败可能发生在移动之后，failure.json 分别记录输入/归档是否存在；先独立检查现场，不自动回滚、删除或把失败解释为零移动。
 
 ## 发布到飞书普通表格
 

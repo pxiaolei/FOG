@@ -3,7 +3,7 @@
 按运营主体/城市/品牌拆表工具
 
 拆分逻辑：
-- 按运营主体拆：根据原表列智能匹配（有品牌+城市用双条件，有单列用单条件）
+- 按运营主体拆：逐 sheet 品牌+城市双条件，不静默回退
 - 按城市拆：按城市匹配运营主体，输出运营主体文件
 - 按品牌拆：按品牌匹配运营主体，输出运营主体文件
 - 纯品牌拆：按品牌独立输出，不映射运营主体
@@ -14,22 +14,25 @@
 - openpyxl + pyyaml
 
 使用方法：
-  python split_by_zhuti.py                    # 正常运行（交互式）
-  python split_by_zhuti.py --config           # 重新配置
-  python split_by_zhuti.py -m 1 -p 雷维亮        # 命令行指定模式和对人
+  python split_by_zhuti.py                    # 默认只列输入，不查库、不写入
+  python split_by_zhuti.py --config --confirmed  # 经授权后重新配置
+  python split_by_zhuti.py -m 1 -p 雷维亮 --confirmed  # 经授权后生成、验收并条件归档
 """
 
 import sys
 import shutil
 import zipfile
 import argparse
+import hashlib
+import json
+import re
+import uuid
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from copy import copy
 
 from openpyxl import load_workbook, Workbook
-from openpyxl.utils import get_column_letter
 
 # 确保 lxx_share / lx_shujuku 可 import（向上查找 skills 目录）
 def _find_skills_dir():
@@ -53,8 +56,6 @@ from lxx_share.excel_utils import (
     PERSON_FIELDS,
     OPERATOR_FIELDS,
     find_column,
-    detect_columns,
-    filter_by_person,
 )
 from lxx_share.fog_config import (
     find_project_root,
@@ -62,7 +63,7 @@ from lxx_share.fog_config import (
     resolve_project_path,
     save_fog_config,
 )
-from lx_shujuku import create_client
+from lx_shujuku import create_client, build_mabiao_mapping
 
 
 # ========================================
@@ -225,9 +226,34 @@ def build_config_from_fog(fog_config, project_root):
 
 
 def load_company_mabiao():
-    """从 lx_shujuku 加载公司库码表映射。"""
+    """Use the existing audited reader; a limited response is not a full map."""
     client = create_client()
-    return client.load_mabiao_mapping()
+    columns = client.schema.columns('operator_brand')
+    fields = ['operator_entity', 'brand_name', 'city_name', 'contact_person',
+              'is_opening', 'open_city_date']
+    available = {c['field'] for c in columns}
+    keys = [c['field'] for c in columns if c.get('key') == 'PRI']
+    if not keys or not set(fields).issubset(available):
+        raise RuntimeError('码表缺必要字段或稳定主键，停止交付')
+    if any(not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', k) for k in keys):
+        raise RuntimeError('码表排序字段不合法')
+    selected = list(dict.fromkeys(keys + fields))
+    sql = f"SELECT {', '.join(selected)} FROM operator_brand ORDER BY {', '.join(keys)}"
+    result = client.execute_full_audited(sql, page_size=min(500, client.max_limit))
+    rows = result.get('rows', [])
+    verification = result.get('verification', {})
+    counts = [result.get('row_count'), result.get('returned_rows'), result.get('total_rows'),
+              verification.get('count_before'), verification.get('count_after')]
+    if (result.get('is_complete') is not True or result.get('possible_truncation') is not False
+            or verification.get('passed') is not True or any(n != len(rows) for n in counts)):
+        raise RuntimeError('码表完整性验证失败，停止交付')
+    mapping = build_mabiao_mapping(rows)
+    if len(mapping['operator_brand_rows']) != len(rows):
+        raise RuntimeError('码表存在缺主体或城市的关系，停止交付')
+    mapping['_query_audit'] = {'is_complete': True, 'possible_truncation': False,
+                               'row_count': len(rows), 'result_sha256': result.get('result_sha256'),
+                               'verification': verification, 'warnings': result.get('warnings', [])}
+    return mapping
 
 
 def get_file_config(config, filename):
@@ -252,351 +278,261 @@ def get_file_config(config, filename):
 # 核心拆分逻辑
 # ========================================
 
-def process_file_optimized(file_path, mapping, file_config, split_mode, col_info):
-    """处理单个文件（优化版：一次遍历收集所有数据）。
+def file_hash(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
-    Args:
-        split_mode: '运营主体' / '城市' / '品牌' / '纯品牌'
 
-    Returns:
-        (result_files, stats, unmatch_data, header_info)
-    """
-    print(f"\n处理文件: {file_path.name}")
-    print(f"  拆分模式: {split_mode}")
-    print(f"  检测结果: 城市={col_info['has_city']}, 品牌={col_info['has_brand']}")
+def safe_name(value):
+    name = re.sub(r'[<>:"/\\\\|?*\x00-\x1f]', '_', str(value)).strip(' .')
+    if not name:
+        raise RuntimeError('文件或接收人名称为空')
+    if name.split('.')[0].upper() in {'CON', 'PRN', 'AUX', 'NUL'} | {
+            f'{kind}{n}' for kind in ('COM', 'LPT') for n in range(1, 10)}:
+        name = '_' + name
+    return name
 
-    # 获取保留 sheet 列表
-    keep_sheets = file_config.get("保留 sheet", [])
-    if keep_sheets:
-        print(f"  保留sheet: {keep_sheets}")
 
-    # 检查必要列
-    if split_mode == '城市' and not col_info['has_city']:
-        print(f"  ❌ 缺少城市列，无法按城市拆分")
-        return {}, {}, {}, {}
-    if split_mode == '品牌' and not col_info['has_brand']:
-        print(f"  ❌ 缺少品牌列，无法按品牌拆分")
-        return {}, {}, {}, {}
+def cell_snapshot(cell):
+    return {'value': cell.value, 'font': copy(cell.font), 'border': copy(cell.border),
+            'fill': copy(cell.fill), 'alignment': copy(cell.alignment),
+            'number_format': cell.number_format}
 
-    city_fields = file_config.get("城市字段", CITY_FIELDS)
-    brand_fields = file_config.get("品牌字段", BRAND_FIELDS)
 
-    # 数据结构
-    data_by_operator = defaultdict(lambda: defaultdict(list))
-    row_styles_by_operator = defaultdict(lambda: defaultdict(list))
-    header_info = {}
-    keep_sheets_data = {}
-    unmatch_data = defaultdict(list)
-
-    src_wb = load_workbook(file_path, data_only=False)
-    total_rows = 0
-
-    for sheet_name in src_wb.sheetnames:
-        if src_wb[sheet_name].sheet_state != 'visible':
-            continue
-
-        src_ws = src_wb[sheet_name]
-        max_row = src_ws.max_row
-        max_col = src_ws.max_column
-
-        is_keep_sheet = sheet_name in keep_sheets
-
-        header_info[sheet_name] = {
-            'rows': [], 'styles': [], 'col_widths': {},
-            'header_rows': 1, 'merged_cells': [],
-        }
-
-        sheet_header_rows = 1
-
-        # 检查配置中的表头行数
-        header_rows_config = file_config.get("表头行数", {})
-        if sheet_name in header_rows_config:
-            sheet_header_rows = header_rows_config[sheet_name]
-            print(f"  sheet '{sheet_name}' 使用配置表头行数: {sheet_header_rows}")
-        elif not is_keep_sheet:
-            for row_idx in range(1, min(5, max_row + 1)):
-                for col_idx in range(1, max_col + 1):
-                    cell_value = src_ws.cell(row=row_idx, column=col_idx).value
-                    if cell_value:
-                        col_str = str(cell_value).strip()
-                        if col_str in city_fields or col_str in brand_fields:
-                            sheet_header_rows = max(sheet_header_rows, row_idx)
-
-        # 收集表头
-        for row_idx in range(1, sheet_header_rows + 1):
-            row_data = []
-            row_styles = []
-            for col_idx in range(1, max_col + 1):
-                cell = src_ws.cell(row=row_idx, column=col_idx)
-                row_data.append(cell.value)
-                row_styles.append({
-                    'number_format': cell.number_format,
-                    'font': copy(cell.font) if cell.has_style else None,
-                    'border': copy(cell.border) if cell.has_style else None,
-                    'fill': copy(cell.fill) if cell.has_style else None,
-                    'alignment': copy(cell.alignment) if cell.has_style else None,
-                })
-            header_info[sheet_name]['rows'].append(row_data)
-            header_info[sheet_name]['styles'].append(row_styles)
-
-        header_info[sheet_name]['header_rows'] = sheet_header_rows
-
-        # 表头区域的合并单元格
-        for merged_range in src_ws.merged_cells.ranges:
-            if merged_range.min_row <= sheet_header_rows:
-                header_info[sheet_name]['merged_cells'].append(merged_range)
-
-        # 列宽
-        for col_idx in range(1, max_col + 1):
-            col_letter = get_column_letter(col_idx)
-            if col_letter in src_ws.column_dimensions:
-                header_info[sheet_name]['col_widths'][col_letter] = src_ws.column_dimensions[col_letter].width
-
-        # 保留 sheet：完整复制
-        if is_keep_sheet:
-            keep_sheets_data[sheet_name] = {
-                'rows': [], 'styles': [],
-                'max_row': max_row, 'max_col': max_col,
-                'merged_cells': list(src_ws.merged_cells.ranges),
-                'row_heights': {},
-            }
-            for row_idx in range(1, max_row + 1):
-                row_data = []
-                row_styles = []
-                for col_idx in range(1, max_col + 1):
-                    cell = src_ws.cell(row=row_idx, column=col_idx)
-                    row_data.append(cell.value)
-                    row_styles.append({
-                        'number_format': cell.number_format,
-                        'font': copy(cell.font) if cell.has_style else None,
-                        'border': copy(cell.border) if cell.has_style else None,
-                        'fill': copy(cell.fill) if cell.has_style else None,
-                        'alignment': copy(cell.alignment) if cell.has_style else None,
-                    })
-                keep_sheets_data[sheet_name]['rows'].append(row_data)
-                keep_sheets_data[sheet_name]['styles'].append(row_styles)
-                if row_idx in src_ws.row_dimensions:
-                    keep_sheets_data[sheet_name]['row_heights'][row_idx] = src_ws.row_dimensions[row_idx].height
-            print(f"  保留sheet '{sheet_name}': {max_row}行（完整复制，含{len(keep_sheets_data[sheet_name]['merged_cells'])}个合并单元格）")
-            continue
-
-        # 非保留 sheet：独立检测列位置
-        sheet_city_col_idx = None
-        sheet_brand_col_idx = None
-        for row_idx in range(1, sheet_header_rows + 1):
-            for col_idx in range(1, max_col + 1):
-                cell_value = src_ws.cell(row=row_idx, column=col_idx).value
-                if cell_value:
-                    col_str = str(cell_value).strip()
-                    if col_str in city_fields and sheet_city_col_idx is None:
-                        sheet_city_col_idx = col_idx
-                    if col_str in brand_fields and sheet_brand_col_idx is None:
-                        sheet_brand_col_idx = col_idx
-
-        if split_mode == '城市' and sheet_city_col_idx is None:
-            print(f"  ⚠️ Sheet '{sheet_name}' 缺少城市列，跳过")
-            continue
-        if split_mode == '品牌' and sheet_brand_col_idx is None:
-            print(f"  ⚠️ Sheet '{sheet_name}' 缺少品牌列，跳过")
-            continue
-
-        # 一次遍历数据行
-        data_rows = list(range(sheet_header_rows + 1, max_row + 1))
-        row_count = len(data_rows)
-
-        for idx, row_idx in enumerate(data_rows):
-            if row_count > 500 and idx % 100 == 0 and idx > 0:
-                print(f"    处理进度: {idx}/{row_count} 行 ({idx*100//row_count}%)")
-
-            city_value = src_ws.cell(row=row_idx, column=sheet_city_col_idx).value if sheet_city_col_idx else None
-            brand_value = src_ws.cell(row=row_idx, column=sheet_brand_col_idx).value if sheet_brand_col_idx else None
-
-            city_str = str(city_value).strip() if city_value else None
-            brand_str = str(brand_value).strip() if brand_value else None
-
-            matched_targets = set()
-            unmatch_reason = None
-
-            if split_mode == '纯品牌':
-                if brand_str:
-                    matched_targets.add(brand_str)
-                else:
-                    unmatch_reason = "品牌列为空"
-
-            elif split_mode == '城市':
-                if city_str and city_str in mapping['city_to_zhuti']:
-                    matched_targets.update(mapping['city_to_zhuti'][city_str])
-                elif city_str:
-                    unmatch_reason = f"城市 '{city_str}' 不在码表中"
-                else:
-                    unmatch_reason = "城市列为空"
-
-            elif split_mode == '品牌':
-                if brand_str and brand_str in mapping['brand_to_zhuti']:
-                    matched_targets.update(mapping['brand_to_zhuti'][brand_str])
-                elif brand_str:
-                    unmatch_reason = f"品牌 '{brand_str}' 不在码表中"
-                else:
-                    unmatch_reason = "品牌列为空"
-
-            else:  # 运营主体
-                if brand_str and city_str:
-                    key = (brand_str, city_str)
-                    if key in mapping['brand_city_to_zhuti']:
-                        matched_targets.update(mapping['brand_city_to_zhuti'][key])
-                    else:
-                        unmatch_reason = f"品牌+城市组合 '{brand_str}+{city_str}' 不在码表中"
-                elif city_str and city_str in mapping['city_to_zhuti']:
-                    matched_targets.update(mapping['city_to_zhuti'][city_str])
-                elif brand_str and brand_str in mapping['brand_to_zhuti']:
-                    matched_targets.update(mapping['brand_to_zhuti'][brand_str])
-                elif not brand_str and not city_str:
-                    unmatch_reason = "品牌和城市列都为空"
-                elif not brand_str:
-                    unmatch_reason = "品牌列为空"
-                else:
-                    unmatch_reason = "城市列为空"
-
-            # 收集数据行
-            if matched_targets:
-                total_rows += 1
-                row_data = []
-                row_styles = []
-                for col_idx in range(1, max_col + 1):
-                    cell = src_ws.cell(row=row_idx, column=col_idx)
-                    row_data.append(cell.value)
-                    row_styles.append({
-                        'number_format': cell.number_format,
-                        'font': copy(cell.font) if cell.has_style else None,
-                        'border': copy(cell.border) if cell.has_style else None,
-                        'fill': copy(cell.fill) if cell.has_style else None,
-                        'alignment': copy(cell.alignment) if cell.has_style else None,
-                    })
-
-                for target in matched_targets:
-                    if split_mode == '纯品牌' or target in mapping.get('all_zhuti', []):
-                        data_by_operator[target][sheet_name].append(row_data)
-                        row_styles_by_operator[target][sheet_name].append(row_styles)
-            elif unmatch_reason:
-                row_data = [src_ws.cell(row=row_idx, column=c).value for c in range(1, max_col + 1)]
-                unmatch_data[sheet_name].append((row_data, brand_str, city_str, unmatch_reason))
-
-    src_wb.close()
-
-    print(f"  总数据行: {total_rows}")
-
-    # 创建临时目录
-    temp_dir = file_path.parent / f"temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    temp_dir.mkdir(exist_ok=True)
-
-    result_files = {}
-    stats = {}
-
-    # 为每个有数据的运营主体生成文件
-    for operator in sorted(data_by_operator.keys()):
-        sheets_data = data_by_operator[operator]
-        if not sheets_data:
-            continue
-
-        operator_rows = sum(len(rows) for rows in sheets_data.values())
-        stats[operator] = operator_rows
-
-        output_name = f"{operator}_{file_path.name}"
-        output_path = temp_dir / output_name
-
-        dst_wb = Workbook()
-        dst_wb.remove(dst_wb.active)
-
-        for sheet_name in sheets_data.keys():
-            rows_data = sheets_data[sheet_name]
-            rows_styles = row_styles_by_operator[operator][sheet_name]
-
-            dst_ws = dst_wb.create_sheet(title=sheet_name[:31])
-
-            # 写入表头
-            if sheet_name in header_info:
-                h_info = header_info[sheet_name]
-                for row_idx, (row_data, row_styles) in enumerate(zip(h_info['rows'], h_info['styles']), 1):
-                    for col_idx, (value, style) in enumerate(zip(row_data, row_styles), 1):
-                        cell = dst_ws.cell(row=row_idx, column=col_idx, value=value)
-                        if style:
-                            if style['font']:
-                                cell.font = style['font']
-                            if style['border']:
-                                cell.border = style['border']
-                            if style['fill']:
-                                cell.fill = style['fill']
-                            if style['alignment']:
-                                cell.alignment = style['alignment']
-                            cell.number_format = style['number_format']
-
-                for col_letter, width in h_info['col_widths'].items():
-                    dst_ws.column_dimensions[col_letter].width = width
-
-                if h_info.get('merged_cells'):
-                    for merged_range in h_info['merged_cells']:
-                        dst_ws.merge_cells(str(merged_range))
-
-            # 写入数据行
-            sheet_hdr_rows = h_info.get('header_rows', 1) if sheet_name in header_info else 1
-            for row_idx, (row_data, row_styles) in enumerate(zip(rows_data, rows_styles), sheet_hdr_rows + 1):
-                for col_idx, (value, style) in enumerate(zip(row_data, row_styles), 1):
-                    cell = dst_ws.cell(row=row_idx, column=col_idx, value=value)
-                    if style:
-                        if style['font']:
-                            cell.font = style['font']
-                        if style['border']:
-                            cell.border = style['border']
-                        if style['fill']:
-                            cell.fill = style['fill']
-                        if style['alignment']:
-                            cell.alignment = style['alignment']
-                        cell.number_format = style['number_format']
-
-        # 写入保留 sheet
-        for keep_sheet_name, keep_data in keep_sheets_data.items():
-            dst_ws = dst_wb.create_sheet(title=keep_sheet_name[:31])
-            for row_idx, (row_data, row_styles) in enumerate(zip(keep_data['rows'], keep_data['styles']), 1):
-                for col_idx, (value, style) in enumerate(zip(row_data, row_styles), 1):
-                    cell = dst_ws.cell(row=row_idx, column=col_idx, value=value)
-                    if style:
-                        if style['font']:
-                            cell.font = style['font']
-                        if style['border']:
-                            cell.border = style['border']
-                        if style['fill']:
-                            cell.fill = style['fill']
-                        if style['alignment']:
-                            cell.alignment = style['alignment']
-                        cell.number_format = style['number_format']
-            if keep_sheet_name in header_info:
-                for col_letter, width in header_info[keep_sheet_name]['col_widths'].items():
-                    dst_ws.column_dimensions[col_letter].width = width
-            if 'merged_cells' in keep_data:
-                for merged_range in keep_data['merged_cells']:
-                    dst_ws.merge_cells(str(merged_range))
-            if 'row_heights' in keep_data:
-                for row_idx, height in keep_data['row_heights'].items():
-                    if height is not None:
-                        dst_ws.row_dimensions[row_idx].height = height
-
-        dst_wb.save(output_path)
-        dst_wb.close()
-        result_files[operator] = output_path
-        print(f"  生成: {output_name} ({operator_rows}行)")
-
-    if unmatch_data:
-        total_unmatch = sum(len(rows) for rows in unmatch_data.values())
-        print(f"  未匹配数据: {total_unmatch}行")
+def resolve_persons(mapping, target_persons):
+    rows = mapping.get('operator_brand_rows')
+    proof = mapping.get('_query_audit', {})
+    if (not rows or proof.get('is_complete') is not True
+            or proof.get('possible_truncation') is not False or proof.get('row_count') != len(rows)):
+        raise RuntimeError('缺完整精确码表及其审计证明，停止按人交付')
+    available = {str(r.get('contact_person') or '').strip() for r in rows} - {''}
+    if target_persons == '全部':
+        persons = sorted(available)
     else:
-        print(f"  未匹配数据: 0行")
+        values = target_persons.split(',') if isinstance(target_persons, str) else target_persons
+        persons = sorted({str(p).strip() for p in values if str(p).strip()})
+    if not persons or set(persons) - available:
+        raise RuntimeError('对接人为空或不在当前完整码表中')
+    names = [safe_name(p).casefold() for p in persons]
+    if len(names) != len(set(names)):
+        raise RuntimeError('对接人名称转换后冲突')
+    return persons
 
-    return result_files, stats, unmatch_data, header_info
+
+def process_file_optimized(file_path, mapping, file_config, split_mode, col_info=None,
+                           person_list=None):
+    """Parse once; retain source identities and contact-level output relations."""
+    file_path = Path(file_path)
+    if file_path.is_symlink():
+        raise RuntimeError('源表不能是符号链接')
+    persons = resolve_persons(mapping, person_list or '全部')
+    rows = mapping['operator_brand_rows']
+    # Identical mapping rows must not duplicate the same source-target relation.
+    relations = {tuple(str(r.get(k) or '').strip() for k in
+                       ('operator', 'brand', 'city', 'contact_person')) for r in rows}
+    source_hash = file_hash(file_path)
+    plan = {'source': file_path, 'source_sha256': source_hash, 'mode': split_mode,
+            'sheets': {}, 'groups': defaultdict(lambda: defaultdict(list)),
+            'classifications': [], 'excluded_sheets': [], 'excluded_rows': [],
+            'unmatched': defaultdict(list),
+            'counts': {'source': 0, 'target': 0, 'filtered': 0, 'unmatched': 0,
+                       'expected_relations': 0, 'actual_relations': 0}}
+    wb = load_workbook(file_path, data_only=False, keep_links=False)
+    try:
+        selected = file_config.get('处理sheet', [])
+        keep = set(file_config.get('保留 sheet', []))
+        unknown = (keep | set(selected)) - set(wb.sheetnames)
+        if unknown:
+            raise RuntimeError('指定的 sheet 不存在: ' + ', '.join(sorted(unknown)))
+        for ws in wb:
+            reason = ('保留sheet仅本地' if ws.title in keep else
+                      '隐藏sheet' if ws.sheet_state != 'visible' else
+                      '非选择sheet' if selected and ws.title not in selected else None)
+            if reason:
+                plan['excluded_sheets'].append({'sheet': ws.title, 'reason': reason})
+                continue
+            header_rows = file_config.get('表头行数', {}).get(ws.title)
+            city_fields = file_config.get('城市字段', CITY_FIELDS)
+            brand_fields = file_config.get('品牌字段', BRAND_FIELDS)
+            if header_rows is None:
+                header_rows = max([1] + [c.row for row in ws.iter_rows(
+                    max_row=min(5, ws.max_row)) for c in row
+                    if str(c.value or '').strip() in set(city_fields) | set(brand_fields)])
+            if not isinstance(header_rows, int) or header_rows < 1 or header_rows > ws.max_row:
+                raise RuntimeError(f'{ws.title}: 表头行数不合法')
+            columns = {}
+            for kind, names in [('city', city_fields), ('brand', brand_fields)]:
+                positions = {c.column for row in ws.iter_rows(max_row=header_rows) for c in row
+                             if str(c.value or '').strip() in names}
+                if len(positions) > 1:
+                    raise RuntimeError(f'{ws.title}: {kind} 列有歧义')
+                columns[kind] = next(iter(positions), None)
+            required = {'运营主体': ('city', 'brand'), '城市': ('city',),
+                        '品牌': ('brand',), '纯品牌': ('brand',)}[split_mode]
+            if any(columns[k] is None for k in required):
+                raise RuntimeError(f'{ws.title}: 缺少所选模式必要列，禁止静默回退')
+            headers = [[cell_snapshot(c) for c in row] for row in ws.iter_rows(max_row=header_rows)]
+            if any(c['value'] is not None and str(c['value']).startswith('=')
+                   for row in headers for c in row):
+                raise RuntimeError(f'{ws.title}: 表头公式无法保证交付正确')
+            merges = [str(m) for m in ws.merged_cells.ranges if m.max_row <= header_rows]
+            if any(m.min_row <= header_rows < m.max_row for m in ws.merged_cells.ranges):
+                raise RuntimeError(f'{ws.title}: 合并单元格跨表头与数据范围')
+            if any(m.min_row > header_rows for m in ws.merged_cells.ranges):
+                raise RuntimeError(f'{ws.title}: 数据区合并单元格无法保证拆分后格式')
+            plan['sheets'][ws.title] = {'headers': headers, 'header_rows': header_rows,
+                                      'widths': {k: d.width for k, d in ws.column_dimensions.items()},
+                                      'merges': merges}
+            plan['excluded_rows'].append({'sheet': ws.title, 'rows': [1, header_rows],
+                                          'reason': 'header'})
+            for row in ws.iter_rows(min_row=header_rows + 1):
+                values = tuple(c.value for c in row)
+                if all(v is None or isinstance(v, str) and not v.strip() for v in values):
+                    plan['excluded_rows'].append({'sheet': ws.title,
+                                                  'rows': [row[0].row, row[0].row],
+                                                  'reason': 'blank'})
+                    continue
+                city = str(values[columns['city'] - 1] or '').strip() if columns['city'] else ''
+                brand = str(values[columns['brand'] - 1] or '').strip() if columns['brand'] else ''
+                if city.startswith('=') or brand.startswith('='):
+                    raise RuntimeError(f'{ws.title}: 范围字段包含公式')
+                identity = (source_hash, ws.title, row[0].row)
+                if split_mode == '纯品牌':
+                    candidates = {(None, brand)} if brand else set()
+                    matched = bool(candidates)
+                else:
+                    matches = {(p, op) for op, b, c, p in relations
+                               if (not columns['city'] or city and c == city)
+                               and (not columns['brand'] or brand and b == brand)}
+                    if any(not p for p, _op in matches):
+                        raise RuntimeError(f'{ws.title}: 匹配码表缺少对接人归属')
+                    matched = bool(matches)
+                    candidates = {(p, op) for p, op in matches if p in persons}
+                category = 'target' if candidates else 'filtered' if matched else 'unmatched'
+                plan['counts']['source'] += 1
+                plan['counts'][category] += 1
+                plan['classifications'].append({'source_row': identity, 'category': category,
+                                                'targets': sorted(candidates, key=str)})
+                if category == 'unmatched':
+                    plan['unmatched'][ws.title].append(
+                        (values, brand, city, '必要范围为空或完整码表中无匹配关系'))
+                if candidates:
+                    if any(c.data_type == 'f' for c in row):
+                        raise RuntimeError(f'{ws.title}: 数据公式无法保证拆分后的引用，停止该文件')
+                    record = {'identity': identity, 'values': values,
+                              'styles': [cell_snapshot(c) for c in row]}
+                    for target in sorted(candidates, key=str):
+                        plan['groups'][target][ws.title].append(record)
+                        plan['counts']['expected_relations'] += 1
+        if not plan['sheets']:
+            raise RuntimeError('没有可拆分的数据 sheet')
+        # Fail on unsafe/colliding output names before creating any formal output.
+        paths = [(safe_name(owner or '管理端').casefold(), safe_name(op).casefold())
+                 for owner, op in plan['groups']]
+        if len(paths) != len(set(paths)):
+            raise RuntimeError('输出名称转换后冲突')
+        if file_hash(file_path) != source_hash:
+            raise RuntimeError('解析期间源文件发生变化')
+        return plan
+    finally:
+        wb.close()
 
 
-# ========================================
-# 报告与打包
-# ========================================
+def write_delivery_files(plan, task_dir):
+    files = {}
+    for target, sheets in sorted(plan['groups'].items(), key=lambda item: str(item[0])):
+        person, operator = target
+        directory = task_dir / '工作文件' / safe_name(person or '管理端')
+        directory.mkdir(parents=True, exist_ok=True)
+        output = directory / (safe_name(operator) + '.xlsx')
+        if output.exists():
+            raise RuntimeError('输出文件冲突')
+        wb = Workbook()
+        wb.remove(wb.active)
+        try:
+            for name, records in sheets.items():
+                ws = wb.create_sheet(name)
+                info = plan['sheets'][name]
+                all_rows = info['headers'] + [r['styles'] for r in records]
+                for row_number, cells in enumerate(all_rows, 1):
+                    for column, data in enumerate(cells, 1):
+                        cell = ws.cell(row_number, column, data['value'])
+                        for attr in ('font', 'border', 'fill', 'alignment', 'number_format'):
+                            setattr(cell, attr, copy(data[attr]))
+                for column, width in info['widths'].items():
+                    ws.column_dimensions[column].width = width
+                for merged in info['merges']:
+                    ws.merge_cells(merged)
+            wb.save(output)
+        finally:
+            wb.close()
+        files[target] = output
+    return files
+
+
+def verify_workbook(plan, target, source):
+    wb = load_workbook(source, data_only=False, keep_links=False)
+    try:
+        expected = plan['groups'][target]
+        if set(wb.sheetnames) != set(expected):
+            raise RuntimeError('工作簿含多余或缺失 sheet')
+        count = 0
+        for name, records in expected.items():
+            ws = wb[name]
+            info = plan['sheets'][name]
+            header = [tuple(c['value'] for c in row) for row in info['headers']]
+            want = header + [r['values'] for r in records]
+            actual = list(ws.iter_rows(values_only=True))
+            normalize = lambda row: tuple(None if v == '' else v for v in row)
+            if list(map(normalize, actual)) != list(map(normalize, want)):
+                raise RuntimeError('实际文件内容、行数或表头与源行关系不一致')
+            expected_styles = info['headers'] + [r['styles'] for r in records]
+            for row, expected_cells in zip(ws.iter_rows(), expected_styles):
+                for cell, data in zip(row, expected_cells):
+                    if cell.__class__.__name__ == 'MergedCell':
+                        continue
+                    if any(copy(getattr(cell, attr)) != data[attr]
+                           for attr in ('font', 'border', 'fill', 'alignment', 'number_format')):
+                        raise RuntimeError('实际样式与源表不一致')
+            for column, width in info['widths'].items():
+                if ws.column_dimensions[column].width != width:
+                    raise RuntimeError('实际列宽不一致')
+            if {str(m) for m in ws.merged_cells.ranges} != set(info['merges']):
+                raise RuntimeError('实际表头合并不一致')
+            count += len(records)
+        return count
+    finally:
+        wb.close()
+
+
+def pack_results(plan, files, task_dir):
+    """Package each recipient separately; never include source or kept sheets."""
+    import io
+    by_person = defaultdict(dict)
+    for target, path in files.items():
+        person, _operator = target
+        by_person[person][path.name] = (target, path)
+    packages = []
+    actual = 0
+    for person, members in sorted(by_person.items(), key=lambda item: str(item[0])):
+        folder = task_dir / ('交付包' if person is not None else '本地品牌包')
+        folder.mkdir(exist_ok=True)
+        package = folder / (safe_name(person) + '.zip' if person is not None else 'local-brand.zip')
+        for target, path in members.values():
+            verify_workbook(plan, target, path)
+        with zipfile.ZipFile(package, 'x', zipfile.ZIP_DEFLATED) as zf:
+            for name, (_target, path) in sorted(members.items()):
+                zf.write(path, name)
+        with zipfile.ZipFile(package) as zf:
+            if zf.testzip() is not None or len(zf.namelist()) != len(members) or set(
+                    zf.namelist()) != set(members):
+                raise RuntimeError('ZIP 成员或结构不正确')
+            for name, (target, _path) in members.items():
+                actual += verify_workbook(plan, target, io.BytesIO(zf.read(name)))
+        packages.append(package)
+    plan['counts']['actual_relations'] = actual
+    if actual != plan['counts']['expected_relations']:
+        raise RuntimeError('输出关系遗漏或重复')
+    return packages
 
 def output_unmatch_report(unmatch_data, file_path, output_dir, header_info):
     """输出未匹配数据报告。"""
@@ -622,7 +558,7 @@ def output_unmatch_report(unmatch_data, file_path, output_dir, header_info):
 
             if h_info.get('rows'):
                 orig_col_count = 0
-                for row_idx, (row_data, row_styles) in enumerate(zip(h_info['rows'], h_info['styles']), 1):
+                for row_idx, row_data in enumerate(h_info['rows'], 1):
                     for col_idx, value in enumerate(row_data, 1):
                         ws.cell(row=row_idx, column=col_idx, value=value)
                     orig_col_count = max(orig_col_count, len(row_data))
@@ -665,51 +601,87 @@ def output_unmatch_report(unmatch_data, file_path, output_dir, header_info):
         return None
 
 
-def pack_results(result_files, stats, mapping, file_path, output_dir, person_list, split_mode='运营主体'):
-    """打包结果。"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    zip_name = f"{timestamp}_{file_path.stem}.zip"
-    zip_path = output_dir / zip_name
+def run_file(file_path, mapping, file_config, split_mode, persons, work_dir):
+    plan = process_file_optimized(file_path, mapping, file_config, split_mode,
+                                  person_list=persons)
+    task_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f') + '_' + uuid.uuid4().hex[:8]
+    task_dir = work_dir / '输出' / task_id
+    task_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+    archive_path = None
+    phase = 'write'
+    try:
+        files = write_delivery_files(plan, task_dir)
+        phase = 'verify_and_pack'
+        packages = pack_results(plan, files, task_dir)
+        counts = plan['counts']
+        if counts['source'] != counts['target'] + counts['filtered'] + counts['unmatched']:
+            raise RuntimeError('源行分类不闭合')
+        phase = 'report'
+        if plan['unmatched']:
+            headers = {name: {'rows': [[c['value'] for c in row] for row in info['headers']],
+                              'header_rows': info['header_rows']}
+                       for name, info in plan['sheets'].items()}
+            if not output_unmatch_report(plan['unmatched'], file_path, task_dir, headers):
+                raise RuntimeError('未匹配报告写入失败')
+        complete = bool(files) and not plan['excluded_sheets'] and counts['unmatched'] == 0
+        audit = {'source_name': file_path.name, 'source_sha256': plan['source_sha256'],
+                 'mode': split_mode, 'complete': complete, 'counts': counts,
+                 'excluded_sheets': plan['excluded_sheets'],
+                 'excluded_rows': plan['excluded_rows'],
+                 'source_rows': plan['classifications'],
+                 'packages': [str(p.relative_to(task_dir)) for p in packages],
+                 'delivery_scope': 'local-only' if split_mode == '纯品牌' else 'contact',
+                 'archive_status': 'planned' if complete else 'retained',
+                 'mapping_audit': mapping['_query_audit']}
+        with (task_dir / 'audit.json').open('x', encoding='utf-8') as out:
+            json.dump(audit, out, ensure_ascii=False, indent=2, default=str)
+        entry = {'file_path': file_path, 'zip_path': None, 'archive_path': None,
+                 'stats': {str(k): sum(len(r) for r in v.values())
+                           for k, v in plan['groups'].items()},
+                 'unmatch_count': counts['unmatched'], 'counts': counts,
+                 'packages': audit['packages'], 'complete': complete}
+        log_path = write_processing_log(work_dir / '处理日志' / task_id,
+                                        [entry], split_mode, persons, persons)
+        if not log_path or not Path(log_path).is_file():
+            raise RuntimeError('处理日志未完成')
+        if file_hash(file_path) != plan['source_sha256']:
+            raise RuntimeError('验收后源文件发生变化，不归档或交付')
+        phase = 'archive'
+        if complete:
+            archive_dir = work_dir / '原表存档' / task_id
+            archive_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+            archive_path = archive_dir / file_path.name
+            if archive_path.exists() or archive_path.is_symlink():
+                raise RuntimeError('归档目标冲突，禁止覆盖')
+            shutil.move(str(file_path), str(archive_path))
+            if file_hash(archive_path) != plan['source_sha256']:
+                raise RuntimeError('归档原件哈希不一致')
+        phase = 'receipt'
+        receipt = {'status': 'ready' if packages else 'no-target-data',
+                   'complete': complete, 'delivery_scope': audit['delivery_scope'],
+                   'packages': audit['packages'], 'counts': counts,
+                   'source_retained': file_path.exists(),
+                   'archive': str(archive_path.relative_to(work_dir)) if archive_path else None,
+                   'source_sha256': plan['source_sha256']}
+        with (task_dir / 'ready.json').open('x', encoding='utf-8') as out:
+            json.dump(receipt, out, ensure_ascii=False, indent=2)
+        print(f"任务: {task_id}；源行 {counts['source']}；目标 {counts['target']}；"
+              f"其他人过滤 {counts['filtered']}；未匹配 {counts['unmatched']}；"
+              f"展开 {counts['actual_relations']}；包数 {len(packages)}；"
+              f"整表完成 {complete}；仅本地品牌 {split_mode == '纯品牌'}")
+        return receipt
+    except Exception as exc:
+        failure = {'status': 'failed', 'phase': phase, 'source_present': file_path.exists(),
+                   'archive_present': bool(archive_path and archive_path.exists()),
+                   'archive': str(archive_path.relative_to(work_dir)) if archive_path else None}
+        try:
+            with (task_dir / 'failure.json').open('x', encoding='utf-8') as out:
+                json.dump(failure, out, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+        raise RuntimeError(f'阶段 {phase} 失败，保留现场；源存在={failure["source_present"]}，'
+                           f'归档存在={failure["archive_present"]}；{exc}') from exc
 
-    need_person_folders = len(person_list) > 1 and split_mode != '纯品牌'
-    target_to_person = mapping.get('zhuti_to_person', {})
-
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.write(file_path, file_path.name)
-
-        if need_person_folders:
-            for person in sorted(person_list):
-                for target, op_file in result_files.items():
-                    persons_for_target = target_to_person.get(target, [])
-                    if person in persons_for_target:
-                        zf.write(op_file, f"{person}/{op_file.name}")
-        else:
-            for target, op_file in result_files.items():
-                zf.write(op_file, op_file.name)
-
-    print(f"\n打包完成: {zip_name}")
-    print(f"  分文件数: {len(result_files)}")
-    print(f"  总数据行: {sum(stats.values())}")
-    if need_person_folders:
-        print(f"  按对接人分文件夹")
-    else:
-        print(f"  直接打包")
-
-    # 清理临时文件
-    for op_file in result_files.values():
-        if op_file.exists():
-            op_file.unlink()
-    if result_files:
-        temp_dir = list(result_files.values())[0].parent
-        if temp_dir.exists():
-            shutil.rmtree(temp_dir)
-
-    return zip_path
-
-
-# ========================================
-# 处理日志
-# ========================================
 
 def write_processing_log(log_dir, log_entries, split_mode, person_list, default_persons):
     """在处理日志文件夹写入 Markdown 格式的拆分日志。
@@ -721,7 +693,7 @@ def write_processing_log(log_dir, log_entries, split_mode, person_list, default_
         person_list: 对接人列表或 '全部'
         default_persons: 默认对接人列表
     """
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S")
@@ -755,9 +727,13 @@ def write_processing_log(log_dir, log_entries, split_mode, person_list, default_
         lines.append(f"")
         lines.append(f"- **输出 ZIP**: {entry['zip_path'].name if entry['zip_path'] else 'N/A'}")
         lines.append(f"- **原表存档**: {entry['archive_path'].name if entry['archive_path'] else 'N/A'}")
-        lines.append(f"- **运营主体/品牌数**: {len(stats)}")
-        lines.append(f"- **有效数据行**: {file_rows}")
+        lines.append(f"- **数据工作簿数（接收人+主体/品牌）**: {len(stats)}")
+        lines.append(f"- **展开输出关系行数**: {file_rows}")
         lines.append(f"- **未匹配行**: {unmatch_count}")
+        if entry.get('counts'):
+            lines.append(f"- **源行分类与展开关系**: {entry['counts']}")
+            lines.append(f"- **任务目录内包路径**: {entry['packages']}")
+            lines.append(f"- **整表完成**: {entry['complete']}；归档实际结果见任务 ready.json/failure.json")
         lines.append(f"")
 
         if stats:
@@ -777,7 +753,7 @@ def write_processing_log(log_dir, log_entries, split_mode, person_list, default_
     lines.append(f"|------|------|")
     lines.append(f"| 处理文件数 | {len(log_entries)} |")
     lines.append(f"| 生成主体/品牌文件 | {total_files} |")
-    lines.append(f"| 有效数据总行数 | {total_rows} |")
+    lines.append(f"| 展开输出关系行数（不等于源行数） | {total_rows} |")
     lines.append(f"| 未匹配总行数 | {total_unmatch} |")
     lines.append(f"")
 
@@ -828,128 +804,43 @@ def main(argv=None):
         if not config:
             return
 
-    project_root = Path(config["项目根目录"])
     work_dir = Path(config["工作目录"])
-    default_persons = config.get("默认对接人", DEFAULT_PERSONS)
-    if isinstance(default_persons, str):
-        default_persons = [default_persons]
-
-    # 确保目录存在
-    todo_dir = work_dir / "输入"
-    done_dir = work_dir / "输出"
-    archive_dir = work_dir / "原表存档"
-
-    for dir_path in [todo_dir, done_dir, archive_dir]:
-        dir_path.mkdir(parents=True, exist_ok=True)
-
-    # 查找待拆文件
-    todo_files = list(todo_dir.glob("*.xlsx")) + list(todo_dir.glob("*.xlsm"))
+    if any((work_dir / name).is_symlink() for name in ('输入', '输出', '处理日志', '原表存档')):
+        print('工作目录入口不能是符号链接')
+        return 1
+    todo_dir = work_dir / '输入'
+    todo_files = sorted(todo_dir.glob('*.xlsx')) + sorted(todo_dir.glob('*.xlsm'))
     if not todo_files:
-        print(f"\n⚠️ 待拆目录中没有 Excel 文件: {todo_dir}")
-        return
-
-    # 加载公司库码表
+        print('没有待拆文件')
+        return 0
+    default_persons = config.get('默认对接人', DEFAULT_PERSONS)
+    mode = args.mode
+    if mode is None:
+        mode = int(input('拆分维度（1=运营主体，2=城市，3=品牌→主体，4=纯品牌）: ').strip() or '1')
+    split_mode = {1: '运营主体', 2: '城市', 3: '品牌', 4: '纯品牌'}[mode]
+    requested = args.person
+    if requested is None:
+        requested = input('对接人（中文全名逗号分隔/all，回车用默认）: ').strip()
+        requested = requested or default_persons
+    target = '全部' if isinstance(requested, str) and requested.lower() == 'all' else requested
     try:
-        full_mapping = load_company_mabiao()
-        if not full_mapping:
-            print("\n❌ 无法从 lx_shujuku 加载公司库码表")
-            return
-    except Exception as e:
-        print(f"❌ 加载公司库码表失败: {e}")
-        return
-
-    print(f"\n待拆文件数: {len(todo_files)}")
-    print("码表来源: lx_shujuku / operator_brand")
-    print(f"默认对接人: {default_persons}")
-    print(f"所有对接人: {sorted(full_mapping['all_persons'])}")
-
-    print("\n请选择拆分选项:")
-    print("  1. 拆分维度: 运营主体 / 城市 / 品牌→运营主体 / 纯品牌")
-    print("  2. 对接人范围: 默认对接人/全部")
-    print("  3. 保留sheet: 指定不拆分的sheet（可选）")
-
-    # 拆分维度
-    if args.mode is not None:
-        mode_map = {2: '城市', 3: '品牌', 4: '纯品牌'}
-        split_mode = mode_map.get(args.mode, '运营主体')
-        print(f"  → 使用命令行参数: 拆分维度={split_mode}")
-    else:
-        mode_input = input(f"\n拆分维度（1=运营主体，2=城市，3=品牌→运营主体，4=纯品牌，默认 运营主体）: ").strip()
-        mode_map = {'2': '城市', '3': '品牌', '4': '纯品牌'}
-        split_mode = mode_map.get(mode_input, '运营主体')
-
-    # 对接人范围
-    if args.person is not None:
-        if args.person.lower() == 'all':
-            target_persons = '全部'
-        else:
-            target_persons = [p.strip() for p in args.person.split(',') if p.strip()]
-        print(f"  → 使用命令行参数: 对接人={target_persons}")
-    else:
-        person_input = input(f"\n对接人范围（1=默认 {','.join(default_persons)}，2=全部，回车默认 1）: ").strip()
-        if person_input == '2':
-            target_persons = '全部'
-        elif person_input == '1' or person_input == '':
-            target_persons = default_persons
-        else:
-            target_persons = person_input
-
-    # 保留 sheet
-    if args.keep_sheets is not None:
-        override_keep_sheets = [s.strip() for s in args.keep_sheets.split(',') if s.strip()]
-        print(f"  → 使用命令行参数: 保留sheet={override_keep_sheets}")
-    else:
-        override_keep_sheets = None
-
-    # 按对接人筛选
-    filtered_mapping, person_list = filter_by_person(full_mapping, target_persons)
-    print(f"\n筛选对接人: {person_list}")
-    print(f"筛选后运营主体: {len(filtered_mapping['all_zhuti'])} 个")
-
-    # 处理每个文件
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_entries = []
+        mapping = load_company_mabiao()
+        persons = resolve_persons(mapping, target)
+    except Exception as exc:
+        print(f'码表或接收人核验失败: {exc}')
+        return 1
+    failed = False
     for file_path in todo_files:
-        file_config = get_file_config(config, file_path.name)
-
-        if override_keep_sheets:
-            file_config["保留 sheet"] = override_keep_sheets
-            print(f"\n  使用指定保留sheet: {override_keep_sheets}")
-
-        col_info = detect_columns(file_path, file_config)
-        result_files, stats, unmatch_data, header_info = process_file_optimized(
-            file_path, filtered_mapping, file_config, split_mode, col_info,
-        )
-
-        zip_path = None
-        archive_path = None
-        if result_files:
-            zip_path = pack_results(result_files, stats, filtered_mapping, file_path, done_dir, person_list, split_mode)
-
-            archive_path = archive_dir / f"{timestamp}_{file_path.name}"
-            shutil.move(str(file_path), str(archive_path))
-            print(f"原表存档: {archive_path.name}")
-
-        unmatch_count = sum(len(rows) for rows in unmatch_data.values()) if unmatch_data else 0
-        if unmatch_data:
-            output_unmatch_report(unmatch_data, file_path, done_dir, header_info)
-
-        log_entries.append({
-            'file_path': file_path,
-            'zip_path': zip_path,
-            'archive_path': archive_path,
-            'stats': stats,
-            'unmatch_count': unmatch_count,
-        })
-
-    # 写入处理日志
-    log_dir = work_dir / "处理日志"
-    write_processing_log(log_dir, log_entries, split_mode, person_list, default_persons)
-
-    print("\n" + "=" * 60)
-    print("拆分完成")
-    print("=" * 60)
-    return 0
+        file_config = dict(get_file_config(config, file_path.name))
+        if args.keep_sheets is not None:
+            file_config['保留 sheet'] = [s.strip() for s in args.keep_sheets.split(',') if s.strip()]
+        try:
+            run_file(file_path, mapping, file_config, split_mode, persons, work_dir)
+        except Exception as exc:
+            failed = True
+            print(f'{file_path.name}: 未完成，{exc}')
+    print('部分任务失败，勿全批重跑' if failed else '本地任务结束；按 ready.json 区分可交付与仅本地、整表与部分范围')
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
