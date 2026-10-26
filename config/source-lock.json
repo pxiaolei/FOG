@@ -1,6 +1,6 @@
 {
   "source_repository": "p-fog",
-  "source_commit": "cc89b8ad3456a97fc71cfa42174687970f4574ef",
+  "source_commit": "fb22d3f5880a694e136e69ebda66db1b61508883",
   "files": {
     ".gitignore": "c6949bf8aacbe72f55e097d80979b05f216ece08be4f7c1cebe9ea0979e82198",
     ".workbuddy/skills/lx-biaogetongbu/.gitignore": "9685dd77a1e7c4e230c34c730d1d069706e10fce5f4f44ee1ab6648fa6f6fd2f",
@@ -108,6 +108,10 @@
     ".workbuddy/skills/lx-init/scripts/write_local_config.py": "2e783d90b9b6430c46a7ab7c019e28cb0dc19152e8338c2ed45f09322bfb2822",
     ".workbuddy/skills/lx-init/tests/test_execution_gate.py": "94d00cca1ac9fe891b33af4dc814bc9331877bed5f694f14869859026310f3b9",
     ".workbuddy/skills/lx-init/tests/test_local_config_gui.py": "ca079f6661ca30df679038cf79d2c8acd8e7bd028192ec61c1b241b3015e3e7a",
+    ".workbuddy/skills/lx-kaicheng/SKILL.md": "45d104a3e91d627feaeba55a73a6b76dd5504d4dc72b202596934a0ec9c51e58",
+    ".workbuddy/skills/lx-kaicheng/agents/openai.yaml": "81b03111e70cab4a0fabbdc36618fae64ff47ed51ac2d3e74ba365eeac557aae",
+    ".workbuddy/skills/lx-kaicheng/references/business-environment.md": "60c72c6c9f01db0049f67e522e1b1e7aeb9c39b51f26e2a3e8e4e0b89a813490",
+    ".workbuddy/skills/lx-kaicheng/references/opening-requirements.md": "47d02b133c56514d72bf527eb3b8f6105a4ff922857161ff5b4b449539ee16ca",
     ".workbuddy/skills/lx-nongfu/SKILL.md": "fc9fba4c7cbb6eea5292cc1988791243c1e80284c4cc2228ee843a44f9276692",
     ".workbuddy/skills/lx-nongfu/agents/openai.yaml": "ca0218b6df7ecfde4e47c9545c70c53f5f64750a9e6bf55652d14e3fa88e6221",
     ".workbuddy/skills/lx-nongfu/scripts/run_publish_split_outputs.py": "c4e207ef4c733a4184dca0dc4196ff4f1e8af637602f258fdb72478b50a254b5",
@@ -183,11 +187,11 @@
     ".workbuddy/skills/lxx_share/tests/test_excel_utils_filter_by_person.py": "920e0f52477662304ef0fc22eee7cb089b1e3f0e63f45e875c200bda3f375d8f",
     ".workbuddy/skills/lxx_share/tests/test_shared_boundary.py": "f590317ad846d464e053b61c94258b9ab0eea3c81e24a7389829a5381264d051",
     ".workbuddy/skills/lxx_share/utils.py": "18b3159a8c10f0d7ea886f7b150d960b0a739a88f4689d856cec394424dda50d",
-    "AGENT.md": "55c9fb302df743f6bdd3dceba459a41b7979b79f44e3c685c02b2a1fd83aebc7",
-    "README.md": "5176127151cdabef6607e494dfe84e29937472ae0de1a7c10f2226684c87d0cc",
-    "config/distribution.json": "13f9a1537addf4db5f72ca3e7b872ed8119144a450be95db425f7d89cb8633c0",
+    "AGENT.md": "fe1813aa93f7761985a18224e23777d1559250438852508ed57f18be4c110373",
+    "README.md": "270b85354331b5b91bc168196059f89b943271969927d31f54fd68b5f8af57ef",
+    "config/distribution.json": "fb102c8ec1914c21996c94e3c0a92554a49f067c5963342fd63ef087602a0b1b",
     "config/fog_config.yaml.example": "233b9cc46238f1482d7e042eadca10db13afaadb6792a27fd81d442336c0db21",
-    "config/workspace-release.json": "7eeac8eb902ea33cb2bd80f3297d26b8e0164a432b83ec9e2a3bdd1e7953ebc2",
+    "config/workspace-release.json": "d63974e24293125656555935766f91ed047010721e8cfd5ccaecc1e18c744139",
     "tools/bootstrap_update.py": "dd42f2791784b3a81a6794f3b67b17fc8fad16afdefdf41015e98c6c12ba7c3b",
     "tools/brand_presets.py": "af7a35f10ce28e73e53593cfcfb34550f3ff9b36be580fca53a49d946211296e",
     "tools/fog.py": "23345b9a9383898c1a8fe682e967d3baa651261c5d9e92bb6b44d55140fac1ae",
@@ -240,5 +244,14 @@
     "workspace/12\u519c\u592b\u534f\u4f5c/\u5f85\u5904\u7406/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
     "workspace/12\u519c\u592b\u534f\u4f5c/\u8f93\u51fa/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
     "workspace/13\u6708\u5ea6\u8fd4\u70b9\u8ba1\u7b97/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "retained_files": {
+    ".workbuddy/skills/lx-biaogetongbu/SKILL.md": "cc89b8ad3456a97fc71cfa42174687970f4574ef",
+    ".workbuddy/skills/lx-biaogetongbu/assets/profiles/jingmo_chengke.json": "cc89b8ad3456a97fc71cfa42174687970f4574ef",
+    ".workbuddy/skills/lx-biaogetongbu/scripts/operator_workbook_sync.py": "cc89b8ad3456a97fc71cfa42174687970f4574ef",
+    ".workbuddy/skills/lx-biaogetongbu/tests/test_operator_workbook_sync.py": "cc89b8ad3456a97fc71cfa42174687970f4574ef",
+    ".workbuddy/skills/lx-zhutichaibiao/README.md": "cc89b8ad3456a97fc71cfa42174687970f4574ef",
+    ".workbuddy/skills/lx-zhutichaibiao/SKILL.md": "cc89b8ad3456a97fc71cfa42174687970f4574ef",
+    ".workbuddy/skills/lx-zhutichaibiao/scripts/split_by_zhuti.py": "cc89b8ad3456a97fc71cfa42174687970f4574ef"
   }
 }
