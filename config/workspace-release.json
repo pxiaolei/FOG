@@ -1,7 +1,7 @@
 {
-  "schema_version": 1,
-  "version": "2026.10.28.3",
-  "repository": "pxiaolei/FOG",
+  "migrations": [],
   "minimum_updater_protocol": 1,
-  "migrations": []
+  "repository": "pxiaolei/FOG",
+  "schema_version": 1,
+  "version": "2026.10.28.4"
 }
