@@ -202,13 +202,14 @@
     "README.md": "270b85354331b5b91bc168196059f89b943271969927d31f54fd68b5f8af57ef",
     "config/distribution.json": "987761c25653ff16f6897d68ef9875b12ae4ff1585a1268749ed7c581417bfed",
     "config/fog_config.yaml.example": "1546fd52f681222fc8ec15e8d6ae29754da7acc7bd645bf464dc7cda3d499b4b",
-    "config/workspace-release.json": "cdfd98c573cd7edd90edac2d7f16bc4157886b63a05bd5cabc6efded8c68ef38",
+    "config/workspace-release.json": "409a790f2c5e1af23504501652beb48f514d2cf7f54d615a4675e785b715192a",
     "tools/bootstrap_update.py": "dd42f2791784b3a81a6794f3b67b17fc8fad16afdefdf41015e98c6c12ba7c3b",
     "tools/brand_presets.py": "af7a35f10ce28e73e53593cfcfb34550f3ff9b36be580fca53a49d946211296e",
     "tools/fog.py": "23345b9a9383898c1a8fe682e967d3baa651261c5d9e92bb6b44d55140fac1ae",
-    "tools/generate_skill_index.py": "39e7c948a6baf1e6945defba2a2d7ae42fb64afa356bcdac673fa29402716736",
+    "tools/generate_skill_index.py": "5cd3d9fbe47dae0d18b195495be29b07868234cbedfe29d1ddfd4258e0a36cb0",
     "tools/lx.cmd": "ac2cc8bb5d03e3c870bf649096f40fb148a3783f7bf1d76078803e16a8e186af",
-    "tools/run_skill.py": "edb32a336419b57171f6f9896db4e65c624954b3c20212487ffd921b8fb2a5b2",
+    "tools/project/generate_skill_index.py": "a9e4621311a1843f7142e2692f4d0fc43d4ba205dc6036f6f8832b2d6cdab58f",
+    "tools/run_skill.py": "ad4b36c6913481d3ab7adfec32a85cd5455a63ede99f96c1322c32541720c3f5",
     "tools/windows/check.ps1": "5d3f8a62a9bb6f7988cb15b4746365abebea23a68d4f1ead132a88013a827e5f",
     "tools/windows/install.ps1": "1ccb54bf9a4e6d605fe166f882add778bc78e7427d2af9089a60eab345a22da0",
     "workspace/.gitkeep": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
@@ -261,9 +262,9 @@
       "generator": "release-assistant-v1",
       "source": "distribution/FOG/config/workspace-release.json",
       "source_sha256": "a22d9dea8f73971cd58ea5a3bf8517f9b5143c168ec73ac4e4300f4f6fe453e3",
-      "version": "2026.10.28.4"
+      "version": "2026.10.28.5"
     }
   },
-  "source_commit": "2ed14f63ec1edf5a3370266826111f997ed0a250",
+  "source_commit": "07e381602b6e5286656cd0ccf111fb36bd810450",
   "source_repository": "p-fog"
 }
