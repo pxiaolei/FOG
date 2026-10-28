@@ -1,15 +1,76 @@
 {
   "scenario_id": "beishen_shensu",
-  "description": "雷维亮对接运营主体的背审申诉普通表格同步。大表链接运行时传入或写入本机 config，不写进共享 profile。",
-  "trigger_keywords": ["同步背审申诉"],
-  "master_sheet_name": "司机背审",
+  "description": "背审申诉：配置中的运营主体普通表 → 总表「司机背审申诉」。总表已有同一司机ID仍可再追加（改图重提）。同一轮同司机只追加靠前第一行，其余 O 写「同期重复提报」并在之后跳过。只同步源A–N到总表同名列（总表落在B–O）。回填只用该司机总表最后一行，且该行背审结果非空。",
+  "trigger_keywords": [
+    "同步背审申诉"
+  ],
+  "master_sheet_name": "司机背审申诉",
+  "master_sheet_id": "0AOZVh",
   "operator_sheet_name": "",
   "operator_folder_template": "{operator}-运营主体",
   "target_table_template": "{operator}-背审申诉",
-  "status_column": "是否提交",
-  "submitted_value": "填写已提交",
-  "key_columns": ["司机ID"],
-  "required_columns": ["品牌", "司机ID", "城市", "问题描述"],
+  "use_configured_operator_urls": true,
+  "match_decorated_headers": true,
+  "skip_already_in_master": false,
+  "same_batch_duplicate_status": "同期重复提报",
+  "default_operators": [
+    "同舟科技",
+    "方舟行武汉",
+    "乖乖马出行",
+    "哈啰文山",
+    "杭州华耀",
+    "江豚出行",
+    "盛世兄弟",
+    "杭州法一",
+    "小象快跑",
+    "易惠出行",
+    "土生福州"
+  ],
+  "status_column": "提报",
+  "status_column_number": 15,
+  "submitted_value": "已提报",
+  "accepted_submitted_values": [
+    "已提报",
+    "/举例",
+    "同期重复提报"
+  ],
+  "write_validation_status": true,
+  "key_columns": [
+    "司机ID"
+  ],
+  "required_columns": [
+    "品牌",
+    "司机ID",
+    "手机号",
+    "司机姓名",
+    "身份证号码",
+    "车牌号",
+    "车辆识别代码（Vin码）",
+    "城市",
+    "问题描述",
+    "人证",
+    "承诺书",
+    "司机端审核失败原因截图",
+    "HH后台审核失败截图",
+    "身份证正面"
+  ],
+  "require_nonempty_columns": [
+    "品牌",
+    "司机ID",
+    "手机号",
+    "司机姓名",
+    "身份证号码",
+    "车牌号",
+    "车辆识别代码（Vin码）",
+    "城市",
+    "问题描述",
+    "人证",
+    "承诺书",
+    "司机端审核失败原因截图",
+    "HH后台审核失败截图",
+    "身份证正面"
+  ],
+  "max_source_column": 14,
   "image_columns": [
     "人证",
     "承诺书",
@@ -19,8 +80,12 @@
   ],
   "result_writeback": {
     "enabled": true,
+    "ignore_duplicates": true,
+    "use_last_row": true,
     "column": "背审结果",
     "source_column": "背审结果",
-    "key_columns": ["司机ID"]
+    "key_columns": [
+      "司机ID"
+    ]
   }
 }

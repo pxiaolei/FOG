@@ -1,0 +1,6 @@
+# 个人凭证，禁止提交或随 skill 分发
+token.env
+
+# Python 编译缓存
+__pycache__/
+*.pyc

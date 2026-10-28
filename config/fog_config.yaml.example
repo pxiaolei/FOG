@@ -31,6 +31,7 @@ enabled_skills:
   lx_nongfu: true
   lx_biaogetongbu: true
   lx_tongzhi: true
+  lx_txhuiyi: true
 
 # ============================================================
 # lx_shujuku
@@ -187,3 +188,13 @@ init:
   write_skill_configs: false
   validate_after_write: true
   report_path: ".lx-init-report.md"
+
+# ============================================================
+# lx_txhuiyi
+# 要配置什么：腾讯会议 Skill 的个人访问 Token，用于调用腾讯会议云端 MCP。
+# 从哪里获取：https://meeting.tencent.com/ai-skill
+# 说明：Token 与个人账号绑定，每人独立申请，不可共用；未填写时会议工具无法调用。
+#       也可改用 Skill 目录内的 token.env，两种方式取先命中的非空值。
+# ============================================================
+lx_txhuiyi:
+  token: ""

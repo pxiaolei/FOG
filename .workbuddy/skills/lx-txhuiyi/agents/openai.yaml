@@ -1,0 +1,6 @@
+interface:
+  display_name: "腾讯会议"
+  short_description: "创建与管理腾讯会议、查询参会人、录制与智能纪要"
+  default_prompt: "使用 $lx-txhuiyi 创建或管理腾讯会议，涉及变更会议、移除受邀人、会中踢人等动作时先展示信息并等我确认。"
+policy:
+  allow_implicit_invocation: false

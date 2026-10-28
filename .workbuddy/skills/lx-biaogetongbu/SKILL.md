@@ -1,6 +1,6 @@
 ---
 name: lx-biaogetongbu
-description: 表格同步工具。用于把 A 表中的记录按字段映射同步到 B 表，覆盖静默乘客登记、背审登记、主体拆表结果同步、农服大文档按品牌城市回填等场景。支持本地 Excel append / update-by-key；在线后端只支持飞书普通电子表格 feishu。当用户要求表格同步、从 A 表同步到 B 表、同步背审申诉、静默乘客或拆表结果时使用。
+description: 表格同步工具。用于把 A 表中的记录按字段映射同步到 B 表，覆盖静默乘客登记、背审登记、日常退卡、异常判责 case、主体拆表结果同步、农服大文档按品牌城市回填等场景。支持本地 Excel append / update-by-key；在线后端只支持飞书普通电子表格 feishu。当用户要求表格同步、从 A 表同步到 B 表、同步背审申诉、静默乘客、日常退卡、异常判责 case 或拆表结果时使用。
 ---
 
 # lx-biaogetongbu — 表格同步
@@ -11,6 +11,8 @@ description: 表格同步工具。用于把 A 表中的记录按字段映射同�
 
 - 静默乘客登记：从待登记名单追加到登记台账。
 - 背审登记：从待背审清单追加到背审登记表。
+- 日常退卡：从配置的运营主体退卡表追加到日常退卡总表，并回填平台处理结果。
+- 异常判责 case：从配置的运营主体登记表追加到「10月case提报」，并回填治理复核结果。
 - 主体拆表同步：把 `lx-zhutichaibiao` 拆出来的表同步到目标汇总表或登记表。
 - 农服回填：把运营主体填写结果按品牌+城市回填到大文档指定列。
 
@@ -21,7 +23,7 @@ description: 表格同步工具。用于把 A 表中的记录按字段映射同�
 | 本地 Excel | `append` | 已离线验证 |
 | 本地 Excel | `update-by-key` | 已离线验证 |
 | 飞书普通电子表格 | `append` / `update-by-key` | 已接 `feishu` 后端，使用 `lx-feishudocs` 和 WorkBuddy 内置 lark-cli |
-| 飞书普通电子表格 | 运营主体固定场景 | 已接 `operator_workbook_sync.py`，支持背审申诉和静默乘客；背审单元格图片可随本次追加行同步 |
+| 飞书普通电子表格 | 运营主体固定场景 | 已接 `operator_workbook_sync.py`，支持背审申诉、静默乘客、日常退卡和异常判责 case；单元格图片随追加行重新挂载到目标表 |
 
 不直接写后台系统或数据库。
 
@@ -29,7 +31,7 @@ description: 表格同步工具。用于把 A 表中的记录按字段映射同�
 
 - 不删除或修改 A 表原始行。
 - 不自动发送、不自动提交后台。
-- 未传 `--confirmed` 时不写入 B 表，也不创建本地输出、目标备份、处理日志或 summary JSON。
+- 未传 `--confirmed` 时不写入 B 表，也不下载或上传单元格图片，也不创建本地输出、目标备份、处理日志或 summary JSON。
 - 正式写入 B 表前自动备份目标文件。
 - `update-by-key` 只更新 `--update-column` 指定列，不整行覆盖。
 - `update-by-key` 默认不使用空值覆盖 B 表；确需清空时显式传 `--allow-blank-updates`。
@@ -110,8 +112,6 @@ python .workbuddy/skills/lx-biaogetongbu/scripts/sync_table.py \
 ```bash
 python .workbuddy/skills/lx-biaogetongbu/scripts/operator_workbook_sync.py \
   --scenario beishen_shensu \
-  --master-url "<背审申诉大表飞书链接>" \
-  --contact-person "雷维亮" \
   --all-operators
 ```
 
@@ -120,19 +120,35 @@ python .workbuddy/skills/lx-biaogetongbu/scripts/operator_workbook_sync.py \
   --scenario jingmo_chengke \
   --master-url "<静默乘客大表飞书链接>" \
   --contact-person "雷维亮" \
+  --operator 盛世兄弟,江豚出行,乖乖马出行
+```
+
+```bash
+python .workbuddy/skills/lx-biaogetongbu/scripts/operator_workbook_sync.py \
+  --scenario tuika_richang \
   --all-operators
 ```
+
+```bash
+python .workbuddy/skills/lx-biaogetongbu/scripts/operator_workbook_sync.py \
+  --scenario yichang_panzhe_case \
+  --all-operators
+```
+
+静默 / 日常退卡 / 背审申诉 / 异常判责 case 场景走 lark-cli，不依赖飞书 MCP。不加 `--confirmed` 即 dry-run。日常退卡、背审申诉和异常判责 case 的主体 URL 读本机 config，可按需加 `--apply-validation-status` 只写缺项到状态列。
 
 默认只预览。真实写入必须显式加 `--confirmed`；未 confirmed 时 `--output-json` 不落盘。若指定的 summary 已存在，必须同时传 `--overwrite --confirmed`，且该检查在创建飞书 client 前完成。
 
 固定场景行为：
 
-- `beishen_shensu`：读取 `{运营主体}-背审申诉`，按 `司机ID` 防重复追加到大表；写入后给来源行写 `是否提交=填写已提交`；大表 `背审结果` 有值时回填来源表同名列。
-- `jingmo_chengke`：读取 `{运营主体}-静默乘客`，按 `订单ID + 用户ID（乘客ID）` 防重复追加到大表；写入后给来源行写 `是否提交=填写已提交`。
+- `beishen_shensu`：从本机 config 的主体 URL 列表读取背审申诉表（`use_configured_operator_urls`，跳过文件夹发现；主体按工作簿标题识别），追加到总表「司机背审申诉」（profile `master_sheet_id=0AOZVh`）。`skip_already_in_master=false`：总表已有同一 `司机ID` 仍追加（改图重提），不把 O 标成已提报。同一轮多行未提报且司机相同，只追加靠前第一行，其余 O 写 `同期重复提报`（之后与 `已提报`、`/举例` 一样跳过）。只同步源表 A–N（`max_source_column=14`），按表头名写入总表 B–O（总表 A 为空）；J–N 为图片列（人证、承诺书、司机端审核失败原因截图、HH后台审核失败截图、身份证正面），`--confirmed` 时用 `drive +preview --type source_file` 下载再用 `sheets +cells-set-image` 重新挂载；状态写到 O 列（`status_column_number=15`，表头 `提报`），成功写 `已提报`；O 列缺项提示不跳过；A–N 缺项写中文提示到 O（如 `缺少B列、I列信息`、`缺少L列图片`）；`match_decorated_headers` 允许表头在字段名后带模板链接或非字母数字后缀（`承诺书https://…` 对齐为承诺书，`车牌号` 不会对齐到 `车牌号码`）；总表 P `背审结果` 按 `司机ID` 回填主体 P，`use_last_row` 只用该司机最后一行，且该行 P 非空才回填（`ignore_duplicates` 不阻断）。默认 dry-run；`--apply-validation-status` 写缺项和 `同期重复提报`；`--confirmed` 才写总表/已提报/挂图片/回填。详见 `workspace/10表格同步/README_beishen.md`。
+- `jingmo_chengke`：读取 `{运营主体}-静默乘客`，按 `品牌+城市+订单ID+用户ID（乘客ID）` 防重复追加到总表「静默收集正在处理」；只同步源表 A–H（`max_source_column=8`）；状态写到 I 列（`status_column_number=9`），值为 `已提报`；`填写已提交`/`已提报`/`已提交` 均视为已处理；`require_nonempty_columns` 缺用户ID 的行跳过不整表作废；默认三家主体见 profile `default_operators`。详见 `workspace/10表格同步/README_jingmo.md`。
+- `tuika_richang`：从本机 config 的主体 URL 列表读取日常退卡表（跳过文件夹发现），按 `司机id+卡券id` 防重复追加到总表「1、日常退卡填写」（`sheet_id=4c07cd`）；只同步源表 A–L（`max_source_column=12`）；状态写到 M 列（`status_column_number=13`），成功写 `已提报`；仅 `已提报`/`/` 视为已处理；缺项写中文提示到 M（如 `缺少L列图片`）；J=`是` 时 K 条件必填；N–P 多列结果回填；`result_writeback.ignore_duplicates=true` 时总表去重键重复只记 `duplicate_warnings`、不进 `blocking.master_duplicates`（回填仍用第一行）。默认 dry-run；`--apply-validation-status` 只写缺项；`--confirmed` 才写总表/回填/已提报。详见 `workspace/10表格同步/README_tuika.md`。
+- `yichang_panzhe_case`：从本机 config 的主体 URL 列表读取异常判责 case 表（`use_configured_operator_urls`，跳过文件夹发现；工作簿标题 `{名}-异常判责case登记-新` 识别主体），追加到总表「10月case提报」（profile `master_sheet_id=aWDUZd`，workbook「商家新-异常判责case登记-LX」）。`skip_already_in_master=false`：总表已有同一 `订单ID` 仍追加（改图重提）。同一轮多行未提报且订单相同，只追加靠前第一行，其余 T 写 `同期重复提报`（之后与 `已提报`、`/举例` 一样跳过）。只同步源表 A–S 里总表同名列（`max_source_column=19`）；N 列表头主体是「平台跑数」、总表是「中台跑数」，不放进 profile 字段名，`common_append` 对不上就跳过。A「提报人」可空。必填文本是 B–L 与 O；M「订单判责通知书截图」必填图；P–S「其他证据1–4（照片）」进 `image_columns`，`require_any_image_columns` 要求至少一张，四列全空才写 `缺少P–S列图片`。状态写到 T 列（`status_column_number=20`，表头 `是否提报`）。总表 T `【治理反馈】本单复核结果` 按 `订单ID` 回填主体 U（表头带换行「（商家无需填写）」，`match_decorated_headers` 对齐），`use_last_row` 只用最后一行，该行结果为空则不回填。主体 U 去掉首尾空白后为 `/示例` 或 `/举例` 时不回填（`result_writeback.skip_source_values`）。默认 dry-run（每日约 15:30）；`--apply-validation-status` 写缺项和 `同期重复提报`；`--confirmed` 才写总表/已提报/挂图片/回填。详见 `workspace/10表格同步/README_yichang_panzhe.md`。
 - 来源表缺少 `是否提交` 表头时，confirmed 写入会在来源表下一空表头列补上该列。
-- 背审图片列如果属于本次要追加的行，脚本会读取普通表格单元格的 `embed-image` 并写入大表对应单元格；写后回读目标单元格确认图片对象数量。
-- 固定运营主体场景会完整读回全部追加行的每个写入单元格、每张图片的 token/URI 身份，以及来源状态/结果更新，不做前 30 条抽样。
-- 浮动图片、无法解析出 `image_token` / `image_uri` 的富文本图片仍会阻断 confirmed 写入，避免把图片/富文本当纯文本丢失。已存在于大表、仅补提交状态的行不会因图片阻断。
+- 图片列如果属于本次要追加的行，脚本会读取单元格 `embed-image`，用 `drive +preview --type source_file` 下载源图，再调用目标表 `sheets +cells-set-image` 重新挂载。跨工作簿禁止复用来源 `image_token`：该 token 只挂在来源电子表格上，直接 `+cells-set` 会返回飞书 `40402 / 602134071 setCell file is not mounted`。同一单元格只有一张图时直接 `+cells-set-image`；多张图时先逐张挂到目标工作簿，再用新的目标 `image_token` 组装 `embed-image`。`--image` 必须是临时目录内的相对路径。详见 `workspace/10表格同步/README_tuika.md`。
+- 固定运营主体场景会完整读回全部追加行的每个写入单元格，并按图片数量确认目标单元格已挂上图片。读回结果附带尺寸供对照。目标 `image_token` 与来源不同是重新挂载后的正常结果。来源状态/结果更新同样全量读回，不做前 30 条抽样。
+- 浮动图片、无法解析出 `image_token` 的富文本图片仍会阻断 confirmed 写入，避免把图片/富文本当纯文本丢失。已存在于大表、仅补提交状态的行不会因图片阻断。
 
 ## 参数说明
 
@@ -178,7 +194,7 @@ python .workbuddy/skills/lx-biaogetongbu/scripts/operator_workbook_sync.py \
 
 - 写入开始后不自动换后端；如果飞书写入失败，直接报告真实失败原因，要求人工确认是否续跑。
 - 本项目后续写表目标是飞书普通电子表格，不使用 Base/智能表格记录接口。
-- `operator_workbook_sync.py` 的固定运营主体场景支持 profile `image_columns` 中的单元格图片同步；通用 `sync_table.py --online` 当前仍只同步标量文本/数字值，不复制图片或其他富文本对象。
+- `operator_workbook_sync.py` 的固定运营主体场景支持 profile `image_columns` 中的单元格图片同步。跨工作簿图片必须先 `drive +preview --type source_file` 下载，再用目标表 `sheets +cells-set-image` 重新挂载，不能复用来源 `image_token`。通用 `sync_table.py --online` 当前仍只同步标量文本/数字值，不复制图片或其他富文本对象。
 
 ## update-by-key 规则
 
@@ -214,6 +230,8 @@ profile 只能保存字段规则和默认模式，不能保存真实飞书链接
 - `assets/profiles/nongfu_update_by_key.example.json`
 - `assets/profiles/beishen_shensu.json`
 - `assets/profiles/jingmo_chengke.json`
+- `assets/profiles/tuika_richang.json`
+- `assets/profiles/yichang_panzhe_case.json`
 
 ## 执行契约
 
